@@ -1,0 +1,56 @@
+/* LeetRecall — Content Script Styles (Toast Notification) */
+
+.leetrecall-toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 999999;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  background: #1a1a2e;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(245, 158, 11, 0.1);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  opacity: 0;
+  transform: translateY(20px) scale(0.95);
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+}
+
+.leetrecall-toast-show {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.leetrecall-toast-hide {
+  opacity: 0;
+  transform: translateY(-10px) scale(0.95);
+}
+
+.leetrecall-toast-icon {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.leetrecall-toast-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.leetrecall-toast-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #f59e0b;
+}
+
+.leetrecall-toast-message {
+  font-size: 14px;
+  font-weight: 500;
+  color: #e2e8f0;
+}

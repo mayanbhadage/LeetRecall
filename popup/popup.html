@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=400">
+  <title>LeetRecall</title>
+  <link rel="stylesheet" href="../styles/design-tokens.css">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="popup-root">
+    <!-- Header -->
+    <header class="popup-header">
+      <div class="popup-header-brand">
+        <span class="brand-icon">🧠</span>
+        <span class="brand-name">LeetRecall</span>
+      </div>
+      <button class="header-btn" id="btn-dashboard" title="Open Dashboard">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7"></rect>
+          <rect x="14" y="3" width="7" height="7"></rect>
+          <rect x="3" y="14" width="7" height="7"></rect>
+          <rect x="14" y="14" width="7" height="7"></rect>
+        </svg>
+      </button>
+    </header>
+
+    <!-- Progress Section -->
+    <section class="section progress-section">
+      <div class="progress-header">
+        <div class="progress-stats">
+          <span class="stat-number" id="due-count">0</span>
+          <span class="stat-label">due today</span>
+        </div>
+        <div class="streak-badge" id="streak-badge">
+          <span class="streak-icon">🔥</span>
+          <span class="streak-count" id="streak-count">0</span>
+        </div>
+      </div>
+      <div class="progress-bar-container">
+        <div class="progress-bar" id="progress-bar" style="width: 0%"></div>
+      </div>
+      <div class="progress-label" id="progress-label">No problems tracked yet</div>
+    </section>
+
+    <!-- Current Problem / Due Queue -->
+    <section class="section" id="current-section">
+      <h3 class="section-title">Review Queue</h3>
+      <div id="queue-container">
+        <div class="empty-state" id="empty-state">
+          <div class="empty-icon">✨</div>
+          <div class="empty-title">All caught up!</div>
+          <div class="empty-message">Solve problems on LeetCode to grow your deck.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Confidence Rating -->
+    <section class="section rating-section" id="rating-section" style="display: none;">
+      <h3 class="section-title">
+        Rate Your Confidence
+        <span class="title-hint" title="How easily did you recall the solution?">ⓘ</span>
+      </h3>
+      <div class="rating-buttons">
+        <button class="rating-btn rating-again" data-rating="1">
+          <span class="rating-label">Again</span>
+          <span class="rating-interval" id="interval-1"></span>
+        </button>
+        <button class="rating-btn rating-hard" data-rating="2">
+          <span class="rating-label">Hard</span>
+          <span class="rating-interval" id="interval-2"></span>
+        </button>
+        <button class="rating-btn rating-good" data-rating="3">
+          <span class="rating-label">Good</span>
+          <span class="rating-interval" id="interval-3"></span>
+        </button>
+        <button class="rating-btn rating-easy" data-rating="4">
+          <span class="rating-label">Easy</span>
+          <span class="rating-interval" id="interval-4"></span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Upcoming -->
+    <section class="section" id="upcoming-section">
+      <h3 class="section-title">Upcoming</h3>
+      <div id="upcoming-list" class="upcoming-list">
+        <div class="empty-hint">No upcoming reviews</div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="popup-footer">
+      <button class="footer-btn primary" id="btn-dashboard-full">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+          <polyline points="9 22 9 12 15 12 15 22"></polyline>
+        </svg>
+        Dashboard
+      </button>
+    </footer>
+  </div>
+
+  <script src="../shared/constants.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

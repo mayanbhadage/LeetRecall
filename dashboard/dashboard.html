@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LeetRecall — Dashboard</title>
+  <link rel="stylesheet" href="../styles/design-tokens.css">
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Top Bar -->
+    <header class="topbar">
+      <div class="topbar-brand">
+        <span class="brand-icon">🧠</span>
+        <span class="brand-name">LeetRecall</span>
+      </div>
+      <nav class="topbar-nav">
+        <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+        <button class="tab-btn" data-tab="problems">All Problems</button>
+        <button class="tab-btn" data-tab="settings">Settings</button>
+      </nav>
+    </header>
+
+    <!-- Dashboard Tab -->
+    <main class="tab-content active" id="tab-dashboard">
+      <!-- Stats Row -->
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-card-value" id="stat-total">0</div>
+          <div class="stat-card-label">Total Problems</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-value accent" id="stat-due">0</div>
+          <div class="stat-card-label">Due Today</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-value" id="stat-streak">0</div>
+          <div class="stat-card-label">Day Streak 🔥</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-value" id="stat-reviews">0</div>
+          <div class="stat-card-label">Total Reviews</div>
+        </div>
+      </div>
+
+      <!-- Progress -->
+      <section class="card">
+        <h2 class="card-title">Today's Progress</h2>
+        <div class="progress-bar-lg-container">
+          <div class="progress-bar-lg" id="dash-progress" style="width: 0%"></div>
+        </div>
+        <div class="progress-text" id="dash-progress-text">No reviews due</div>
+      </section>
+
+      <!-- Difficulty Breakdown -->
+      <section class="card">
+        <h2 class="card-title">Difficulty Breakdown</h2>
+        <div class="difficulty-bars" id="difficulty-bars">
+          <div class="diff-row">
+            <span class="diff-label difficulty-easy">Easy</span>
+            <div class="diff-bar-track"><div class="diff-bar diff-bar-easy" id="bar-easy" style="width: 0%"></div></div>
+            <span class="diff-count" id="count-easy">0</span>
+          </div>
+          <div class="diff-row">
+            <span class="diff-label difficulty-medium">Medium</span>
+            <div class="diff-bar-track"><div class="diff-bar diff-bar-medium" id="bar-medium" style="width: 0%"></div></div>
+            <span class="diff-count" id="count-medium">0</span>
+          </div>
+          <div class="diff-row">
+            <span class="diff-label difficulty-hard">Hard</span>
+            <div class="diff-bar-track"><div class="diff-bar diff-bar-hard" id="bar-hard" style="width: 0%"></div></div>
+            <span class="diff-count" id="count-hard">0</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Problems Tab -->
+    <main class="tab-content" id="tab-problems">
+      <section class="card">
+        <div class="table-header">
+          <h2 class="card-title">All Problems</h2>
+          <div class="table-controls">
+            <input type="text" class="search-input" id="search-input" placeholder="Search problems...">
+            <select class="filter-select" id="filter-difficulty">
+              <option value="all">All Difficulties</option>
+              <option value="Easy">Easy</option>
+              <option value="Medium">Medium</option>
+              <option value="Hard">Hard</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-wrapper">
+          <table class="problems-table" id="problems-table">
+            <thead>
+              <tr>
+                <th class="sortable" data-sort="title">Title</th>
+                <th class="sortable" data-sort="difficulty">Difficulty</th>
+                <th class="sortable" data-sort="addedAt">Added</th>
+                <th class="sortable" data-sort="lastSolvedAt">Last Solved</th>
+                <th class="sortable" data-sort="efactor">Confidence</th>
+                <th class="sortable" data-sort="nextDueDate">Next Due</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="problems-tbody"></tbody>
+          </table>
+          <div class="empty-table" id="empty-table" style="display:none;">
+            <div class="empty-icon">📋</div>
+            <div class="empty-title">No problems tracked</div>
+            <div class="empty-message">Solve problems on LeetCode and they'll appear here automatically.</div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Settings Tab -->
+    <main class="tab-content" id="tab-settings">
+      <section class="card">
+        <h2 class="card-title">Preferences</h2>
+        <div class="settings-group">
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-label">Daily Goal</div>
+              <div class="setting-desc">Number of problems to review per day</div>
+            </div>
+            <input type="number" class="setting-input" id="setting-daily-goal" min="1" max="50" value="5">
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-label">Notifications</div>
+              <div class="setting-desc">Get reminders for due reviews</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="setting-notifications" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2 class="card-title">Data</h2>
+        <div class="settings-group">
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-label">Export Data</div>
+              <div class="setting-desc">Download all your data as JSON</div>
+            </div>
+            <button class="btn btn-secondary" id="btn-export">Export</button>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-label">Import Data</div>
+              <div class="setting-desc">Restore from a JSON backup</div>
+            </div>
+            <button class="btn btn-secondary" id="btn-import">Import</button>
+            <input type="file" id="import-file" accept=".json" style="display:none;">
+          </div>
+          <div class="setting-row danger">
+            <div class="setting-info">
+              <div class="setting-label">Reset All Data</div>
+              <div class="setting-desc">Delete all tracked problems and settings</div>
+            </div>
+            <button class="btn btn-danger" id="btn-reset">Reset</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="../shared/constants.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>

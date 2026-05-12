@@ -1,0 +1,152 @@
+/* 
+ * LeetRecall — Design Tokens
+ * Dark, minimalistic theme with amber accents
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  /* ─── Colors ─────────────────────────────────────── */
+  --bg-primary: #0b0e14;
+  --bg-secondary: #111520;
+  --bg-surface: #161b27;
+  --bg-elevated: #1c2233;
+  --bg-hover: #222839;
+
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-accent: rgba(245, 158, 11, 0.3);
+
+  --text-primary: #e8edf5;
+  --text-secondary: #8490a5;
+  --text-tertiary: #5a6478;
+  --text-accent: #f59e0b;
+
+  --accent: #f59e0b;
+  --accent-hover: #fbbf24;
+  --accent-muted: rgba(245, 158, 11, 0.15);
+  --accent-glow: rgba(245, 158, 11, 0.08);
+
+  --green: #22c55e;
+  --green-muted: rgba(34, 197, 94, 0.15);
+  --red: #ef4444;
+  --red-muted: rgba(239, 68, 68, 0.15);
+  --orange: #f97316;
+  --orange-muted: rgba(249, 115, 22, 0.15);
+  --blue: #3b82f6;
+  --blue-muted: rgba(59, 130, 246, 0.15);
+
+  --easy: #22c55e;
+  --medium: #f59e0b;
+  --hard: #ef4444;
+
+  /* ─── Typography ─────────────────────────────────── */
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-xs: 11px;
+  --font-sm: 12px;
+  --font-base: 13px;
+  --font-md: 14px;
+  --font-lg: 16px;
+  --font-xl: 20px;
+  --font-2xl: 24px;
+
+  /* ─── Spacing ────────────────────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* ─── Radius ─────────────────────────────────────── */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+
+  /* ─── Shadows ────────────────────────────────────── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+
+  /* ─── Transitions ────────────────────────────────── */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 400ms;
+}
+
+/* ─── Reset ──────────────────────────────────────────── */
+
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-family);
+  font-size: var(--font-base);
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+  transition: color var(--duration-fast);
+}
+
+a:hover {
+  color: var(--accent-hover);
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: inherit;
+}
+
+/* ─── Utility Classes ────────────────────────────────── */
+
+.text-accent { color: var(--text-accent); }
+.text-secondary { color: var(--text-secondary); }
+.text-tertiary { color: var(--text-tertiary); }
+
+.difficulty-easy { color: var(--easy); }
+.difficulty-medium { color: var(--medium); }
+.difficulty-hard { color: var(--hard); }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.badge-easy {
+  background: var(--green-muted);
+  color: var(--easy);
+}
+
+.badge-medium {
+  background: var(--accent-muted);
+  color: var(--medium);
+}
+
+.badge-hard {
+  background: var(--red-muted);
+  color: var(--hard);
+}
