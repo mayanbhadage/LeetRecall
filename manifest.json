@@ -6,7 +6,8 @@
   "permissions": [
     "storage",
     "alarms",
-    "notifications"
+    "notifications",
+    "activeTab"
   ],
   "host_permissions": [
     "https://leetcode.com/*"

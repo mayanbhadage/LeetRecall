@@ -89,3 +89,181 @@
     transform: translateY(100vh) rotate(720deg) scale(0.3);
   }
 }
+
+/* ─── Review Notes Panel ──────────────────────────────── */
+
+.leetrecall-notes-panel {
+  position: fixed;
+  top: 80px;
+  right: 24px;
+  z-index: 999990;
+  width: 320px;
+  max-width: calc(100vw - 48px);
+  background: #161b27;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(245, 158, 11, 0.08);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  transform: translateX(120%) scale(0.95);
+  opacity: 0;
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  overflow: hidden;
+}
+
+.leetrecall-notes-panel-show {
+  transform: translateX(0) scale(1);
+  opacity: 1;
+}
+
+.leetrecall-notes-panel-hide {
+  transform: translateX(80px) scale(0.95);
+  opacity: 0;
+  transition: all 0.3s ease;
+}
+
+.leetrecall-notes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: rgba(245, 158, 11, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  cursor: grab;
+  user-select: none;
+}
+
+.leetrecall-notes-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #f59e0b;
+}
+
+.leetrecall-notes-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.leetrecall-notes-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.leetrecall-notes-minimize,
+.leetrecall-notes-close {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: #5a6478;
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 150ms;
+  line-height: 1;
+  font-family: inherit;
+}
+
+.leetrecall-notes-minimize:hover,
+.leetrecall-notes-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e8edf5;
+}
+
+.leetrecall-notes-close:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.leetrecall-notes-body {
+  padding: 12px 16px 16px;
+}
+
+.leetrecall-notes-meta {
+  font-size: 11px;
+  color: #5a6478;
+  margin-bottom: 12px;
+  letter-spacing: 0.01em;
+}
+
+.leetrecall-notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.leetrecall-note-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #1c2233;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 150ms;
+  line-height: 1.45;
+}
+
+.leetrecall-note-item:hover {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: #222839;
+}
+
+.leetrecall-note-item.checked {
+  opacity: 0.45;
+}
+
+.leetrecall-note-item.checked .leetrecall-note-text {
+  text-decoration: line-through;
+  color: #5a6478;
+}
+
+.leetrecall-note-item.checked .leetrecall-note-check {
+  background: #f59e0b;
+  border-color: #f59e0b;
+}
+
+.leetrecall-note-item.checked .leetrecall-note-check::after {
+  opacity: 1;
+}
+
+.leetrecall-note-cb {
+  display: none;
+}
+
+.leetrecall-note-check {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  position: relative;
+  transition: all 150ms;
+  margin-top: 1px;
+}
+
+.leetrecall-note-check::after {
+  content: '✓';
+  position: absolute;
+  top: -1px;
+  left: 2px;
+  font-size: 11px;
+  color: #0b0e14;
+  font-weight: 700;
+  opacity: 0;
+  transition: opacity 150ms;
+}
+
+.leetrecall-note-text {
+  font-size: 12px;
+  color: #8490a5;
+  transition: all 150ms;
+  word-break: break-word;
+}
+

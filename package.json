@@ -1,0 +1,28 @@
+{
+  "name": "leetcodetracker",
+  "version": "1.0.0",
+  "description": "> 🧠 Spaced repetition for LeetCode. Auto-track accepted submissions and master problems with Anki-style reviews.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mayanbhadage/LeetRecall.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/mayanbhadage/LeetRecall/issues"
+  },
+  "homepage": "https://github.com/mayanbhadage/LeetRecall#readme",
+  "devDependencies": {
+    "jest": "^30.4.2",
+    "jest-environment-jsdom": "^30.4.1"
+  }
+}

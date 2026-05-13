@@ -101,3 +101,275 @@ body::-webkit-scrollbar-thumb { background: var(--border-default); border-radius
 .footer-btn { display: flex; align-items: center; justify-content: center; gap: var(--space-2); width: 100%; padding: var(--space-3); border-radius: var(--radius-md); font-size: var(--font-sm); font-weight: 600; transition: all var(--duration-fast); }
 .footer-btn.primary { background: var(--bg-elevated); border: 1px solid var(--border-default); color: var(--text-primary); }
 .footer-btn.primary:hover { background: var(--bg-hover); border-color: var(--accent); color: var(--accent); }
+
+/* ─── Previous Notes Review ──────────────────────────── */
+
+.notes-review-section {
+  animation: fadeIn var(--duration-normal) var(--ease-out);
+  background: rgba(245, 158, 11, 0.04);
+  border-left: 2px solid var(--accent);
+}
+
+.notes-review-section .section-title {
+  color: var(--accent);
+}
+
+.notes-review-icon {
+  font-size: 14px;
+}
+
+.notes-review-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-xs);
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-3);
+}
+
+.notes-meta-sep { opacity: 0.4; }
+
+.notes-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.notes-check-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+  line-height: 1.4;
+}
+
+.notes-check-item:hover {
+  border-color: var(--border-default);
+  background: var(--bg-elevated);
+}
+
+.notes-check-item.checked {
+  opacity: 0.5;
+  border-color: var(--border-subtle);
+}
+
+.notes-check-item.checked .notes-check-text {
+  text-decoration: line-through;
+  color: var(--text-tertiary);
+}
+
+.notes-check-item.checked .notes-check-custom {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.notes-check-item.checked .notes-check-custom::after {
+  opacity: 1;
+}
+
+.notes-checkbox {
+  display: none;
+}
+
+.notes-check-custom {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  border: 1.5px solid var(--border-default);
+  border-radius: 3px;
+  position: relative;
+  transition: all var(--duration-fast);
+  margin-top: 1px;
+}
+
+.notes-check-custom::after {
+  content: '✓';
+  position: absolute;
+  top: -1px;
+  left: 2px;
+  font-size: 11px;
+  color: var(--bg-primary);
+  font-weight: 700;
+  opacity: 0;
+  transition: opacity var(--duration-fast);
+}
+
+.notes-check-text {
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+  transition: all var(--duration-fast);
+  word-break: break-word;
+}
+
+.notes-dismiss-btn {
+  display: block;
+  width: 100%;
+  padding: var(--space-2);
+  font-size: var(--font-xs);
+  color: var(--text-tertiary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  transition: all var(--duration-fast);
+}
+
+.notes-dismiss-btn:hover {
+  color: var(--text-secondary);
+  border-color: var(--border-default);
+}
+
+/* ─── Notes Input Section ──────────────────────────────── */
+
+.notes-input-section {
+  margin-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-3);
+}
+
+.notes-input-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  padding: var(--space-1) 0;
+  transition: color var(--duration-fast);
+}
+
+.notes-input-header:hover {
+  color: var(--accent);
+}
+
+.notes-input-label {
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.notes-input-header:hover .notes-input-label {
+  color: var(--accent);
+}
+
+.notes-toggle-arrow {
+  font-size: var(--font-xs);
+  color: var(--text-tertiary);
+  transition: transform var(--duration-fast);
+}
+
+.notes-input-body {
+  margin-top: var(--space-2);
+  animation: fadeIn var(--duration-normal) var(--ease-out);
+}
+
+.notes-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+
+.notes-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  animation: noteSlideIn var(--duration-normal) var(--ease-spring);
+}
+
+@keyframes noteSlideIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.notes-item-bullet {
+  color: var(--accent);
+  font-weight: 700;
+  line-height: 1.5;
+  flex-shrink: 0;
+}
+
+.notes-item-text {
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+  flex: 1;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.notes-item-remove {
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-tertiary);
+  padding: 0 2px;
+  opacity: 0.5;
+  transition: all var(--duration-fast);
+  flex-shrink: 0;
+}
+
+.notes-item-remove:hover {
+  color: var(--red);
+  opacity: 1;
+}
+
+.notes-add-row {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.notes-input-field {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--font-sm);
+  outline: none;
+  transition: border-color var(--duration-fast);
+}
+
+.notes-input-field::placeholder {
+  color: var(--text-tertiary);
+  opacity: 0.7;
+}
+
+.notes-input-field:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.15);
+}
+
+.notes-add-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-muted);
+  color: var(--accent);
+  border-radius: var(--radius-sm);
+  font-size: 18px;
+  font-weight: 600;
+  transition: all var(--duration-fast);
+  flex-shrink: 0;
+}
+
+.notes-add-btn:hover {
+  background: var(--accent);
+  color: var(--bg-primary);
+}
+
+.notes-hint {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  opacity: 0.6;
+  margin-top: var(--space-1);
+}
+

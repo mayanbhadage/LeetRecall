@@ -55,6 +55,17 @@
       </div>
     </section>
 
+    <!-- Previous Notes (from last attempt) -->
+    <section class="section notes-review-section" id="notes-review-section" style="display: none;">
+      <h3 class="section-title">
+        <span class="notes-review-icon">📋</span>
+        Notes from Previous Attempt
+      </h3>
+      <div class="notes-review-meta" id="notes-review-meta"></div>
+      <div class="notes-checklist" id="notes-checklist"></div>
+      <button class="notes-dismiss-btn" id="btn-dismiss-notes">Dismiss</button>
+    </section>
+
     <!-- Confidence Rating -->
     <section class="section rating-section" id="rating-section" style="display: none;">
       <h3 class="section-title">
@@ -78,6 +89,23 @@
           <span class="rating-label">Easy</span>
           <span class="rating-interval" id="interval-4"></span>
         </button>
+      </div>
+
+      <!-- Notes Input for Current Attempt -->
+      <div class="notes-input-section" id="notes-input-section">
+        <div class="notes-input-header" id="notes-toggle">
+          <span class="notes-input-label">📝 Add Notes</span>
+          <span class="notes-toggle-arrow" id="notes-toggle-arrow">▸</span>
+        </div>
+        <div class="notes-input-body" id="notes-input-body" style="display: none;">
+          <div class="notes-items-list" id="notes-items-list"></div>
+          <div class="notes-add-row">
+            <input type="text" class="notes-input-field" id="notes-input-field" 
+                   placeholder="e.g., Remember to check edge case..." maxlength="200">
+            <button class="notes-add-btn" id="btn-add-note" title="Add note">+</button>
+          </div>
+          <div class="notes-hint">Press Enter or click + to add a note. Notes are saved with your rating.</div>
+        </div>
       </div>
     </section>
 

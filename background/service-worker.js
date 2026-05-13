@@ -71,8 +71,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 async function handleMessage(message, sender) {
   switch (message.type) {
-    case 'PROBLEM_ACCEPTED':
-      return await handleProblemAccepted(message.data);
+    case 'PROBLEM_SUBMITTED':
+      return await handleProblemSubmitted(message.data);
 
     case 'RATE_CONFIDENCE':
       return await handleRateConfidence(message.data);
@@ -113,6 +113,12 @@ async function handleMessage(message, sender) {
     case 'GET_ACTIVITY':
       return await handleGetActivity();
 
+    case 'GET_PREVIOUS_NOTES':
+      return await handleGetPreviousNotes(message.data);
+
+    case 'SAVE_NOTES':
+      return await handleSaveNotes(message.data);
+
     default:
       return { success: false, error: `Unknown message type: ${message.type}` };
   }
@@ -120,16 +126,22 @@ async function handleMessage(message, sender) {
 
 // ─── Handlers ──────────────────────────────────────────────────────
 
-async function handleProblemAccepted(data) {
-  const { slug, title, url, difficulty, tags } = data;
+async function handleProblemSubmitted(data) {
+  const { slug, title, url, difficulty, tags, status } = data;
+  const isAccepted = status === 'Accepted';
   
   // Check if already tracked
   let problem = await Storage.getProblem(slug);
 
   if (problem) {
-    // Already tracked — update solve count and timestamp
-    problem.solveCount += 1;
-    problem.lastSolvedAt = new Date().toISOString();
+    // Already tracked
+    if (isAccepted) {
+      problem.solveCount = (problem.solveCount || 0) + 1;
+      problem.lastSolvedAt = new Date().toISOString();
+    } else {
+      problem.failedAttempts = (problem.failedAttempts || 0) + 1;
+    }
+
     // Merge new tags if any are found
     if (tags && tags.length > 0) {
       const existing = problem.tags || [];
@@ -137,29 +149,41 @@ async function handleProblemAccepted(data) {
       problem.tags = merged;
     }
     await Storage.saveProblem(slug, problem);
-    console.log(`[LeetRecall] Updated existing problem: ${title}`);
+    console.log(`[LeetRecall] Updated existing problem: ${title} (${status})`);
   } else {
     // New problem — create record
     problem = createProblemRecord(data);
+    
+    // Adjust if it's a failed attempt
+    if (!isAccepted) {
+      problem.solveCount = 0;
+      problem.failedAttempts = 1;
+      // It's still due immediately so they can rate/note it
+    }
+
     await Storage.saveProblem(slug, problem);
 
-    // Update stats
-    const stats = await Storage.getStats();
-    stats.totalSolved += 1;
-    await updateStreak(stats);
-    await Storage.saveStats(stats);
+    // Update stats only if accepted
+    if (isAccepted) {
+      const stats = await Storage.getStats();
+      stats.totalSolved += 1;
+      await updateStreak(stats);
+      await Storage.saveStats(stats);
+    }
 
-    console.log(`[LeetRecall] Tracked new problem: ${title}`);
+    console.log(`[LeetRecall] Tracked new problem: ${title} (${status})`);
   }
 
-  // Track activity
-  await Storage.recordActivity('solved');
+  // Track activity only on accepted
+  if (isAccepted) {
+    await Storage.recordActivity('solved');
+  }
 
   await updateBadge();
   return { success: true, problem, isNew: !data._existing };
 }
 
-async function handleRateConfidence({ slug, rating }) {
+async function handleRateConfidence({ slug, rating, notes }) {
   const problem = await Storage.getProblem(slug);
   if (!problem) {
     return { success: false, error: 'Problem not found' };
@@ -175,11 +199,18 @@ async function handleRateConfidence({ slug, rating }) {
   problem.nextDueDate = sm2Result.nextDueDate;
   problem.lastSolvedAt = new Date().toISOString();
   
-  // Add to history
-  problem.history.push({
+  // Add to history (now includes notes)
+  const historyEntry = {
     date: new Date().toISOString(),
     rating: rating,
-  });
+  };
+
+  // Attach notes if provided (array of note strings)
+  if (notes && Array.isArray(notes) && notes.length > 0) {
+    historyEntry.notes = notes.filter(n => n.trim().length > 0);
+  }
+
+  problem.history.push(historyEntry);
 
   await Storage.saveProblem(slug, problem);
 
@@ -380,6 +411,56 @@ async function handleGetActivity() {
   return { success: true, activity };
 }
 
+async function handleGetPreviousNotes({ slug }) {
+  const problem = await Storage.getProblem(slug);
+  if (!problem) {
+    return { success: true, notes: [], previousAttempt: null };
+  }
+
+  // Find the most recent history entry with notes
+  const history = problem.history || [];
+  let previousNotes = [];
+  let previousAttempt = null;
+
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].notes && history[i].notes.length > 0) {
+      previousNotes = history[i].notes;
+      previousAttempt = {
+        date: history[i].date,
+        rating: history[i].rating,
+        ratingLabel: CONFIDENCE_LABELS[history[i].rating] || 'Unknown',
+        attemptNumber: i + 1,
+      };
+      break;
+    }
+  }
+
+  return {
+    success: true,
+    notes: previousNotes,
+    previousAttempt,
+    totalAttempts: history.length,
+    isDue: new Date(problem.nextDueDate) <= new Date(),
+  };
+}
+
+async function handleSaveNotes({ slug, notes }) {
+  const problem = await Storage.getProblem(slug);
+  if (!problem) {
+    return { success: false, error: 'Problem not found' };
+  }
+
+  // Update notes on the most recent history entry
+  const history = problem.history || [];
+  if (history.length > 0) {
+    const lastEntry = history[history.length - 1];
+    lastEntry.notes = (notes || []).filter(n => n.trim().length > 0);
+    await Storage.saveProblem(slug, problem);
+  }
+
+  return { success: true };
+}
+
 // ─── Notifications ─────────────────────────────────────────────────
 
 async function scheduleDailyReminder() {
@@ -466,4 +547,13 @@ async function updateStreak(stats) {
   }
 
   stats.lastActiveDate = today;
+}
+
+// ─── Exports for Testing ────────────────────────────────────────────────
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    handleProblemSubmitted,
+    handleRateConfidence,
+    handleMessage,
+  };
 }

@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', init);
 
 let currentProblem = null;
 let dueProblems = [];
+let pendingNotes = [];  // Notes being composed for the current attempt
 
 async function init() {
   await loadData();
@@ -21,7 +22,7 @@ async function loadData() {
 
   if (dueRes.success) {
     dueProblems = dueRes.problems;
-    renderQueue(dueProblems);
+    await renderQueue(dueProblems);
     updateProgress(dueRes.problems, statsRes?.stats);
   }
 
@@ -44,6 +45,32 @@ function setupListeners() {
       if (currentProblem) rateConfidence(currentProblem.id, rating);
     });
   });
+
+  // ─── Notes Toggle ────────────────────────────────
+  document.getElementById('notes-toggle').addEventListener('click', () => {
+    const body = document.getElementById('notes-input-body');
+    const arrow = document.getElementById('notes-toggle-arrow');
+    const isHidden = body.style.display === 'none';
+    body.style.display = isHidden ? 'block' : 'none';
+    arrow.textContent = isHidden ? '▾' : '▸';
+    if (isHidden) {
+      document.getElementById('notes-input-field').focus();
+    }
+  });
+
+  // ─── Add Note ────────────────────────────────────
+  document.getElementById('btn-add-note').addEventListener('click', addNoteFromInput);
+  document.getElementById('notes-input-field').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addNoteFromInput();
+    }
+  });
+
+  // ─── Dismiss Previous Notes ──────────────────────
+  document.getElementById('btn-dismiss-notes').addEventListener('click', () => {
+    document.getElementById('notes-review-section').style.display = 'none';
+  });
 }
 
 function openDashboard() {
@@ -52,7 +79,7 @@ function openDashboard() {
 
 // ─── Rendering ─────────────────────────────────────────
 
-function renderQueue(problems) {
+async function renderQueue(problems) {
   const container = document.getElementById('queue-container');
   const emptyState = document.getElementById('empty-state');
   const ratingSection = document.getElementById('rating-section');
@@ -67,13 +94,38 @@ function renderQueue(problems) {
 
   container.innerHTML = '';
 
+  // Detect if user is currently on a LeetCode problem page
+  let activeSlug = null;
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tabs.length > 0 && tabs[0].url) {
+      const url = new URL(tabs[0].url);
+      if (url.hostname.includes('leetcode.com') && url.pathname.includes('/problems/')) {
+        const parts = url.pathname.split('/');
+        const idx = parts.indexOf('problems');
+        if (idx !== -1) activeSlug = parts[idx + 1];
+      }
+    }
+  } catch (e) {
+    // Ignore permissions/query errors
+  }
+
+  // Auto-select the problem they are currently viewing if it's in the queue
+  let selectedIndex = 0;
+  if (activeSlug) {
+    const matchIdx = problems.findIndex(p => p.id === activeSlug);
+    if (matchIdx !== -1) {
+      selectedIndex = matchIdx;
+    }
+  }
+
   problems.forEach((problem, i) => {
-    const card = createProblemCard(problem, i === 0);
+    const card = createProblemCard(problem, i === selectedIndex);
     container.appendChild(card);
   });
 
-  // Select first problem
-  selectProblem(problems[0]);
+  // Select the determined problem
+  selectProblem(problems[selectedIndex]);
 }
 
 function createEmptyState() {
@@ -114,11 +166,21 @@ function createProblemCard(problem, isActive) {
   return card;
 }
 
-function selectProblem(problem) {
+async function selectProblem(problem) {
   currentProblem = problem;
+  pendingNotes = [];  // Reset notes for new problem
+  renderNotesList();
+
   const ratingSection = document.getElementById('rating-section');
   ratingSection.style.display = 'block';
   updateIntervalHints(problem);
+
+  // Collapse notes input
+  document.getElementById('notes-input-body').style.display = 'none';
+  document.getElementById('notes-toggle-arrow').textContent = '▸';
+
+  // Load previous notes for this problem
+  await loadPreviousNotes(problem.id);
 }
 
 function updateIntervalHints(problem) {
@@ -190,10 +252,97 @@ function updateStats(stats) {
 // ─── Actions ───────────────────────────────────────────
 
 async function rateConfidence(slug, rating) {
-  const response = await sendMessage('RATE_CONFIDENCE', { slug, rating });
+  const response = await sendMessage('RATE_CONFIDENCE', {
+    slug,
+    rating,
+    notes: pendingNotes.length > 0 ? pendingNotes : undefined,
+  });
   if (response.success) {
+    pendingNotes = [];
+    renderNotesList();
+    document.getElementById('notes-review-section').style.display = 'none';
     await loadData();
   }
+}
+
+// ─── Notes Management ──────────────────────────────────
+
+function addNoteFromInput() {
+  const input = document.getElementById('notes-input-field');
+  const text = input.value.trim();
+  if (!text) return;
+  if (pendingNotes.length >= 10) return; // Max 10 notes per attempt
+
+  pendingNotes.push(text);
+  input.value = '';
+  input.focus();
+  renderNotesList();
+}
+
+function removeNote(index) {
+  pendingNotes.splice(index, 1);
+  renderNotesList();
+}
+
+function renderNotesList() {
+  const container = document.getElementById('notes-items-list');
+  if (pendingNotes.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+
+  container.innerHTML = pendingNotes.map((note, i) => `
+    <div class="notes-item">
+      <span class="notes-item-bullet">•</span>
+      <span class="notes-item-text">${escapeHtml(note)}</span>
+      <button class="notes-item-remove" data-index="${i}" title="Remove">×</button>
+    </div>
+  `).join('');
+
+  container.querySelectorAll('.notes-item-remove').forEach(btn => {
+    btn.addEventListener('click', () => removeNote(parseInt(btn.dataset.index)));
+  });
+}
+
+async function loadPreviousNotes(slug) {
+  const reviewSection = document.getElementById('notes-review-section');
+  const res = await sendMessage('GET_PREVIOUS_NOTES', { slug });
+
+  if (!res.success || !res.notes || res.notes.length === 0) {
+    reviewSection.style.display = 'none';
+    return;
+  }
+
+  // Show previous notes section
+  reviewSection.style.display = 'block';
+
+  // Meta info
+  const meta = document.getElementById('notes-review-meta');
+  const attemptDate = new Date(res.previousAttempt.date).toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric',
+  });
+  meta.innerHTML = `
+    <span class="notes-meta-date">${attemptDate}</span>
+    <span class="notes-meta-sep">·</span>
+    <span class="notes-meta-rating">Rated: ${res.previousAttempt.ratingLabel}</span>
+  `;
+
+  // Checklist
+  const checklist = document.getElementById('notes-checklist');
+  checklist.innerHTML = res.notes.map((note, i) => `
+    <label class="notes-check-item" id="notes-check-${i}">
+      <input type="checkbox" class="notes-checkbox">
+      <span class="notes-check-custom"></span>
+      <span class="notes-check-text">${escapeHtml(note)}</span>
+    </label>
+  `).join('');
+
+  // Add checkbox interaction (strikethrough on check)
+  checklist.querySelectorAll('.notes-checkbox').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('.notes-check-item').classList.toggle('checked', cb.checked);
+    });
+  });
 }
 
 // ─── Helpers ───────────────────────────────────────────
