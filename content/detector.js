@@ -121,6 +121,12 @@
   }
 
   function onAccepted() {
+    // Guard: bail if extension was reloaded and this script is stale
+    if (!chrome.runtime?.id) {
+      observer.disconnect();
+      return;
+    }
+
     const slug = Extractor.getSlug();
     if (!slug) return;
 
