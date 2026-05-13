@@ -28,12 +28,46 @@
   let activeTimeMs = 0;
   let lastActiveTimestamp = Date.now();
   let isTrackingActive = true;
+  let timerWidget = null;
+  let timerText = null;
+
+  function initTimerWidget() {
+    if (document.getElementById('leetrecall-timer')) return;
+    
+    timerWidget = document.createElement('div');
+    timerWidget.id = 'leetrecall-timer';
+    timerWidget.className = 'leetrecall-timer-widget';
+    
+    timerWidget.innerHTML = `
+      <div class="leetrecall-timer-icon">⏱️</div>
+      <div class="leetrecall-timer-text">00:00</div>
+    `;
+    
+    timerText = timerWidget.querySelector('.leetrecall-timer-text');
+    document.body.appendChild(timerWidget);
+  }
+
+  function formatTimerDisplay(ms) {
+    const sec = Math.floor(ms / 1000);
+    const m = Math.floor(sec / 60).toString().padStart(2, '0');
+    const s = (sec % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  }
+
+  function updateTimerUI() {
+    if (!timerText) return;
+    timerText.textContent = formatTimerDisplay(activeTimeMs);
+  }
 
   function loadTimeTracker(slug) {
     chrome.storage.local.get(['leetrecall_time'], (result) => {
       const times = result.leetrecall_time || {};
       activeTimeMs = times[slug] || 0;
       lastActiveTimestamp = Date.now();
+      
+      initTimerWidget();
+      updateTimerUI();
+      if (!isTrackingActive && timerWidget) timerWidget.classList.add('paused');
     });
   }
 
@@ -52,6 +86,8 @@
       delete times[slug];
       chrome.storage.local.set({ leetrecall_time: times });
     });
+    activeTimeMs = 0;
+    updateTimerUI();
   }
 
   function updateActiveTime() {
@@ -59,6 +95,7 @@
       activeTimeMs += (Date.now() - lastActiveTimestamp);
     }
     lastActiveTimestamp = Date.now();
+    updateTimerUI();
   }
 
   function pauseTracking() {
@@ -66,12 +103,14 @@
     updateActiveTime();
     isTrackingActive = false;
     saveTimeTracker(currentSlug);
+    if (timerWidget) timerWidget.classList.add('paused');
   }
 
   function resumeTracking() {
     if (isTrackingActive) return;
     lastActiveTimestamp = Date.now();
     isTrackingActive = true;
+    if (timerWidget) timerWidget.classList.remove('paused');
   }
 
   document.addEventListener('visibilitychange', () => {
@@ -82,12 +121,16 @@
   window.addEventListener('blur', pauseTracking);
   window.addEventListener('focus', resumeTracking);
 
+  let tickCount = 0;
   setInterval(() => {
     if (isTrackingActive) {
       updateActiveTime();
-      saveTimeTracker(currentSlug);
+      tickCount++;
+      if (tickCount % 10 === 0) {
+        saveTimeTracker(currentSlug);
+      }
     }
-  }, 10000);
+  }, 1000);
 
   // ─── SPA Navigation Detection ─────────────────────────────────
 

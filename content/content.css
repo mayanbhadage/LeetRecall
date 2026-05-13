@@ -267,3 +267,45 @@
   word-break: break-word;
 }
 
+/* ─── Active Time Tracker Widget ──────────────────────── */
+
+.leetrecall-timer-widget {
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  z-index: 999990;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: #161b27;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  transition: all 0.3s ease;
+  user-select: none;
+}
+
+.leetrecall-timer-widget.paused {
+  opacity: 0.5;
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
+.leetrecall-timer-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.leetrecall-timer-widget.paused .leetrecall-timer-icon {
+  filter: grayscale(1);
+}
+
+.leetrecall-timer-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e8edf5;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
