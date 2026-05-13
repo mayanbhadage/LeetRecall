@@ -2,20 +2,26 @@
  * LeetRecall — Submission Detector (Content Script)
  * 
  * Detects accepted submissions on LeetCode problem pages using:
- * 1. DOM MutationObserver (primary)
- * 2. Fetch/XHR interception (fallback)
+ * 1. Fetch interception (PRIMARY — most reliable, fires exactly once)
+ * 2. DOM MutationObserver (BACKUP — only active after a submit click)
  * 
  * Handles SPA navigation (LeetCode is a React SPA).
- * Shows celebration animation on first accepted submission.
+ * Shows celebration animation on accepted submission.
  */
 
 (function () {
   'use strict';
 
   let lastDetectedSlug = null;
-  let isLocked = false;         // Hard lock to prevent any re-entry
-  const DEBOUNCE_MS = 10000;    // Block duplicate detections for 10 seconds
-  let currentSlug = null;       // Track current problem for SPA navigation
+  let isLocked = false;
+  const DEBOUNCE_MS = 15000;      // Block duplicate detections for 15 seconds
+  let currentSlug = null;
+  let submissionInFlight = false;  // Only DOM-observe after user actually submits
+  const PAGE_LOAD_GRACE_MS = 5000; // Ignore DOM mutations during initial page load
+  let pageReady = false;
+
+  // Don't react to DOM until page has settled
+  setTimeout(() => { pageReady = true; }, PAGE_LOAD_GRACE_MS);
 
   // ─── SPA Navigation Detection ─────────────────────────────────
 
@@ -33,9 +39,12 @@
       const newSlug = getCurrentSlug();
       if (newSlug && newSlug !== currentSlug) {
         currentSlug = newSlug;
-        // Reset lock when navigating to a new problem
+        // Reset state when navigating to a new problem
         isLocked = false;
         lastDetectedSlug = null;
+        submissionInFlight = false;
+        pageReady = false;
+        setTimeout(() => { pageReady = true; }, PAGE_LOAD_GRACE_MS);
         console.log(`[LeetRecall] Navigated to: ${newSlug}`);
       }
     }
@@ -44,11 +53,49 @@
   urlObserver.observe(document.body, { childList: true, subtree: true });
   currentSlug = getCurrentSlug();
 
-  // ─── Primary: DOM Observer ─────────────────────────────────────
+  // ─── Fetch Interception (PRIMARY detection) ────────────────────
+  // This is the most reliable method — it fires when LeetCode's
+  // submission API actually returns status_msg: "Accepted".
+
+  const originalFetch = window.fetch;
+  window.fetch = async function (...args) {
+    const response = await originalFetch.apply(this, args);
+
+    try {
+      const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
+
+      // Detect when user submits (submission is in flight)
+      if (url.includes('/submit')) {
+        submissionInFlight = true;
+        console.log('[LeetRecall] Submission detected via API');
+        // Auto-clear after 30s in case we miss the result
+        setTimeout(() => { submissionInFlight = false; }, 30000);
+      }
+
+      // Monitor submission check endpoints
+      if (url.includes('/check/')) {
+        const clone = response.clone();
+        clone.json().then((data) => {
+          if (data?.status_msg === 'Accepted') {
+            submissionInFlight = false;
+            onAccepted();
+          }
+        }).catch(() => { /* ignore non-JSON */ });
+      }
+    } catch (e) {
+      // Silently fail — don't break LeetCode
+    }
+
+    return response;
+  };
+
+  // ─── DOM Observer (BACKUP — only when submission is in flight) ─
 
   const observer = new MutationObserver((mutations) => {
+    // Only check DOM if page is loaded AND a submission is in flight
+    if (!pageReady || !submissionInFlight) return;
+
     for (const mutation of mutations) {
-      // Check added nodes
       if (mutation.addedNodes.length > 0) {
         for (const node of mutation.addedNodes) {
           if (node.nodeType === Node.ELEMENT_NODE) {
@@ -56,69 +103,28 @@
           }
         }
       }
-
-      // Check attribute/text changes on existing nodes
-      if (mutation.target && mutation.target.nodeType === Node.ELEMENT_NODE) {
-        checkForAccepted(mutation.target);
-      }
     }
   });
 
   function checkForAccepted(node) {
     const text = node.textContent || '';
 
-    // Look for the "Accepted" result — LeetCode shows this in green
-    const isAccepted =
-      // Text content check
-      (text.includes('Accepted') && !text.includes('Not Accepted')) ||
-      // Check for success-colored elements
-      node.querySelector?.('[class*="text-green"], [class*="success"], [data-e2e-locator="submission-result"]');
+    // Must contain "Accepted" but not "Not Accepted"
+    if (!text.includes('Accepted') || text.includes('Not Accepted')) return;
 
-    if (!isAccepted) return;
+    // Must also contain runtime/memory stats (strong signal of a fresh result)
+    const hasBenchmarks = text.includes('Runtime') || text.includes('Memory');
+    
+    // Or contain the specific submission result element
+    const hasResultEl = node.querySelector?.('[data-e2e-locator="submission-result"]');
 
-    // Verify it's a submission result, not just the word "Accepted" elsewhere
-    const resultIndicators = [
-      '[data-e2e-locator="submission-result"]',
-      '[class*="submit"]',
-      '[class*="result"]',
-      '[class*="status"]',
-    ];
-
-    let isSubmissionResult = false;
-
-    // Check if this node or its parent matches result indicators
-    for (const selector of resultIndicators) {
-      if (
-        node.matches?.(selector) ||
-        node.querySelector?.(selector) ||
-        node.closest?.(selector)
-      ) {
-        isSubmissionResult = true;
-        break;
-      }
-    }
-
-    // Also check if the "Accepted" text appears with runtime/memory stats
-    // which is a strong indicator of a submission result
-    if (!isSubmissionResult && (text.includes('Runtime') || text.includes('Memory'))) {
-      isSubmissionResult = true;
-    }
-
-    // Check for green-colored "Accepted" text specifically
-    if (!isSubmissionResult) {
-      const greenElements = node.querySelectorAll?.('[class*="green"], [class*="success"]') || [];
-      for (const el of greenElements) {
-        if (el.textContent.includes('Accepted')) {
-          isSubmissionResult = true;
-          break;
-        }
-      }
-    }
-
-    if (isSubmissionResult) {
+    if (hasBenchmarks || hasResultEl) {
+      submissionInFlight = false;
       onAccepted();
     }
   }
+
+  // ─── Core Handler ─────────────────────────────────────────────
 
   function onAccepted() {
     // Guard: bail if extension was reloaded and this script is stale
@@ -130,7 +136,7 @@
     const slug = Extractor.getSlug();
     if (!slug) return;
 
-    // Hard lock — block ALL duplicate detections
+    // Hard lock — one celebration per problem per 15 seconds
     if (isLocked && slug === lastDetectedSlug) {
       return;
     }
@@ -144,7 +150,7 @@
 
     // Extract problem info and send to service worker
     const problemInfo = Extractor.extractAll();
-    console.log('[LeetRecall] Detected accepted submission:', problemInfo.title);
+    console.log('[LeetRecall] ✅ Accepted submission:', problemInfo.title);
 
     chrome.runtime.sendMessage(
       { type: 'PROBLEM_ACCEPTED', data: problemInfo },
@@ -160,37 +166,10 @@
     );
   }
 
-  // ─── Fallback: Fetch Interception ──────────────────────────────
-
-  const originalFetch = window.fetch;
-  window.fetch = async function (...args) {
-    const response = await originalFetch.apply(this, args);
-
-    try {
-      const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
-
-      // Monitor submission check endpoints
-      if (url.includes('/submissions/') || url.includes('/check/')) {
-        const clone = response.clone();
-        clone.json().then((data) => {
-          if (data?.status_msg === 'Accepted' || data?.state === 'SUCCESS') {
-            if (data.status_msg === 'Accepted') {
-              onAccepted();
-            }
-          }
-        }).catch(() => { /* ignore parsing errors for non-JSON responses */ });
-      }
-    } catch (e) {
-      // Silently fail — don't break LeetCode
-    }
-
-    return response;
-  };
-
   // ─── Celebration Animation ─────────────────────────────────────
 
   function showCelebration(title, isNew) {
-    // Remove any existing toast/celebration to prevent stacking
+    // Remove any existing toast/celebration
     const existing = document.querySelector('.leetrecall-toast');
     if (existing) existing.remove();
     const existingOverlay = document.querySelector('.leetrecall-confetti-overlay');
@@ -212,12 +191,10 @@
 
     document.body.appendChild(toast);
 
-    // Animate in
     requestAnimationFrame(() => {
       toast.classList.add('leetrecall-toast-show');
     });
 
-    // Remove after 4 seconds
     setTimeout(() => {
       toast.classList.add('leetrecall-toast-hide');
       setTimeout(() => toast.remove(), 400);
@@ -246,7 +223,6 @@
       overlay.appendChild(particle);
     }
 
-    // Clean up after animation
     setTimeout(() => overlay.remove(), 3500);
   }
 
@@ -255,7 +231,6 @@
   observer.observe(document.body, {
     childList: true,
     subtree: true,
-    characterData: true,
   });
 
   console.log('[LeetRecall] Content script loaded — watching for submissions');
