@@ -217,11 +217,43 @@
   // ─── DOM Observer (BACKUP — only when submission is in flight) ─
 
   const observer = new MutationObserver((mutations) => {
-    // Only check DOM if page is loaded AND a submission is in flight
     if (!pageReady || !submissionInFlight) return;
 
-    // Fast global check on any mutation if submission is in flight
-    const resultEl = document.querySelector('[data-e2e-locator="submission-result"]');
+    for (const mutation of mutations) {
+      if (mutation.addedNodes.length > 0) {
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            checkForSubmissionResult(node);
+          }
+        }
+      }
+      
+      // Also check if text changed inside an existing result element
+      if (mutation.type === 'characterData' || mutation.type === 'childList') {
+        const target = mutation.target;
+        if (target && target.nodeType === Node.ELEMENT_NODE) {
+          const resultEl = target.closest?.('[data-e2e-locator="submission-result"]');
+          if (resultEl) {
+            const txt = resultEl.textContent.trim();
+            if (txt && !txt.includes('Pending') && !txt.includes('Judging')) {
+              submissionInFlight = false;
+              processStatus(txt);
+              return;
+            }
+          }
+        }
+      }
+    }
+  });
+
+  function checkForSubmissionResult(node) {
+    let resultEl = null;
+    if (node.matches && node.matches('[data-e2e-locator="submission-result"]')) {
+      resultEl = node;
+    } else if (node.querySelector) {
+      resultEl = node.querySelector('[data-e2e-locator="submission-result"]');
+    }
+
     if (resultEl) {
       const txt = resultEl.textContent.trim();
       if (txt && !txt.includes('Pending') && !txt.includes('Judging')) {
@@ -230,7 +262,27 @@
         return;
       }
     }
-  });
+
+    const text = node.textContent || '';
+    if (!text) return;
+
+    if (text.includes('Accepted') && !text.includes('Not Accepted')) {
+      if (document.body.innerText.includes('Runtime') || document.body.innerText.includes('Memory')) {
+        submissionInFlight = false;
+        processStatus('Accepted');
+        return;
+      }
+    }
+
+    const failures = ['Wrong Answer', 'Time Limit Exceeded', 'Memory Limit Exceeded', 'Runtime Error', 'Compile Error', 'Output Limit Exceeded'];
+    for (const failure of failures) {
+      if (text === failure || text.startsWith(failure + '\n') || text.startsWith(failure + ' ')) {
+        submissionInFlight = false;
+        processStatus(failure);
+        return;
+      }
+    }
+  }
 
   function processStatus(rawText) {
     let status = rawText;
@@ -242,44 +294,6 @@
     else if (status.startsWith('Compile Error')) status = 'Compile Error';
     
     onSubmissionResult(status);
-  }
-
-  function checkForSubmissionResult(node) {
-    // First try the explicit data attribute — check the node itself AND its descendants
-    let resultEl = null;
-    if (node.matches && node.matches('[data-e2e-locator="submission-result"]')) {
-      resultEl = node;
-    } else if (node.querySelector) {
-      resultEl = node.querySelector('[data-e2e-locator="submission-result"]');
-    }
-
-    if (resultEl) {
-      submissionInFlight = false;
-      processStatus(resultEl.textContent.trim() || 'Completed');
-      return;
-    }
-
-    // Fallback based on text content since structure changes often
-    const text = node.textContent || '';
-    
-    // Check for Accepted + Runtime/Memory benchmarks globally
-    if (text.includes('Accepted') && !text.includes('Not Accepted')) {
-      if (document.body.innerText.includes('Runtime') || document.body.innerText.includes('Memory')) {
-        submissionInFlight = false;
-        processStatus('Accepted');
-        return;
-      }
-    }
-
-    // Check for common failure strings prominently displayed
-    const failures = ['Wrong Answer', 'Time Limit Exceeded', 'Memory Limit Exceeded', 'Runtime Error', 'Compile Error', 'Output Limit Exceeded'];
-    for (const failure of failures) {
-      if (text === failure || text.startsWith(failure + '\n') || text.startsWith(failure + ' ')) {
-        submissionInFlight = false;
-        processStatus(failure);
-        return;
-      }
-    }
   }
 
   // ─── Core Handler ─────────────────────────────────────────────
