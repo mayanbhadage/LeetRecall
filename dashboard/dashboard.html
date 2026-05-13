@@ -137,6 +137,14 @@
           <div class="empty-hint">No review data yet</div>
         </div>
       </section>
+
+      <!-- Time to Completion Over Time -->
+      <section class="card">
+        <h2 class="card-title">Average Time to Completion — Last 30 Days</h2>
+        <div class="accuracy-chart" id="time-chart">
+          <div class="empty-hint">No submission time data yet</div>
+        </div>
+      </section>
     </main>
 
     <!-- Problems Tab -->
@@ -167,6 +175,8 @@
                 <th class="sortable" data-sort="addedAt">Added</th>
                 <th class="sortable" data-sort="lastSolvedAt">Last Solved</th>
                 <th class="sortable" data-sort="efactor">Confidence</th>
+                <th class="sortable" data-sort="avgTime">Avg Time</th>
+                <th class="sortable" data-sort="failedAttempts">Failures</th>
                 <th class="sortable" data-sort="nextDueDate">Next Due</th>
                 <th>Actions</th>
               </tr>

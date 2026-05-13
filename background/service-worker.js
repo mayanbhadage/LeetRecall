@@ -130,11 +130,10 @@ async function handleProblemSubmitted(data) {
   const { slug, title, url, difficulty, tags, status } = data;
   const isAccepted = status === 'Accepted';
   
-  // Check if already tracked
   let problem = await Storage.getProblem(slug);
+  let isNew = false;
 
   if (problem) {
-    // Already tracked
     if (isAccepted) {
       problem.solveCount = (problem.solveCount || 0) + 1;
       problem.lastSolvedAt = new Date().toISOString();
@@ -142,45 +141,45 @@ async function handleProblemSubmitted(data) {
       problem.failedAttempts = (problem.failedAttempts || 0) + 1;
     }
 
-    // Merge new tags if any are found
     if (tags && tags.length > 0) {
       const existing = problem.tags || [];
       const merged = [...new Set([...existing, ...tags])];
       problem.tags = merged;
     }
-    await Storage.saveProblem(slug, problem);
     console.log(`[LeetRecall] Updated existing problem: ${title} (${status})`);
   } else {
-    // New problem — create record
+    isNew = true;
     problem = createProblemRecord(data);
     
-    // Adjust if it's a failed attempt
     if (!isAccepted) {
       problem.solveCount = 0;
       problem.failedAttempts = 1;
-      // It's still due immediately so they can rate/note it
     }
 
-    await Storage.saveProblem(slug, problem);
-
-    // Update stats only if accepted
     if (isAccepted) {
       const stats = await Storage.getStats();
       stats.totalSolved += 1;
       await updateStreak(stats);
       await Storage.saveStats(stats);
     }
-
     console.log(`[LeetRecall] Tracked new problem: ${title} (${status})`);
   }
 
-  // Track activity only on accepted
+  problem.submissions = problem.submissions || [];
+  problem.submissions.push({
+    date: new Date().toISOString(),
+    status: status,
+    timeSpentMs: data.timeSpentMs || 0
+  });
+
+  await Storage.saveProblem(slug, problem);
+
   if (isAccepted) {
     await Storage.recordActivity('solved');
   }
 
   await updateBadge();
-  return { success: true, problem, isNew: !data._existing };
+  return { success: true, problem, isNew };
 }
 
 async function handleRateConfidence({ slug, rating, notes }) {
@@ -353,19 +352,35 @@ async function handleGetAnalytics() {
     const avgRating = data.ratings.length > 0
       ? data.ratings.reduce((a, b) => a + b, 0) / data.ratings.length
       : 0;
+
+    const times = data.problems.flatMap(slug => {
+      const p = problems[slug];
+      return (p.submissions || []).filter(s => s.timeSpentMs > 0 && s.status === 'Accepted').map(s => s.timeSpentMs);
+    });
+    const avgTimeMs = times.length > 0 ? times.reduce((a, b) => a + b, 0) / times.length : 0;
+    
+    const statuses = data.problems.flatMap(slug => {
+      const p = problems[slug];
+      return (p.submissions || []).map(s => s.status);
+    });
+    const successRate = statuses.length > 0 ? (statuses.filter(s => s === 'Accepted').length / statuses.length) * 100 : 0;
+
     return {
       tag,
       count: data.count,
       avgEfactor: Math.round(avgEfactor * 100) / 100,
       avgRating: Math.round(avgRating * 100) / 100,
+      avgTimeMs,
+      successRate: Math.round(successRate),
       weakScore: Math.round((3 - avgEfactor) * 100) / 100, // higher = weaker
     };
   }).sort((a, b) => b.weakScore - a.weakScore);
 
-  // ─── Accuracy Over Time (last 30 days) ───
+  // ─── Accuracy & Time Over Time (last 30 days) ───
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
   const dailyAccuracy = {};
+  const dailyTime = {};
 
   list.forEach(p => {
     (p.history || []).forEach(h => {
@@ -376,6 +391,17 @@ async function handleGetAnalytics() {
         if (h.rating >= 3) dailyAccuracy[day].good++;
       }
     });
+
+    (p.submissions || []).forEach(s => {
+      if (s.timeSpentMs > 0 && s.status === 'Accepted') {
+        const day = s.date.split('T')[0];
+        if (new Date(day) >= thirtyDaysAgo) {
+          if (!dailyTime[day]) dailyTime[day] = { totalMs: 0, count: 0 };
+          dailyTime[day].totalMs += s.timeSpentMs;
+          dailyTime[day].count++;
+        }
+      }
+    });
   });
 
   const accuracyTimeline = Object.entries(dailyAccuracy)
@@ -384,6 +410,14 @@ async function handleGetAnalytics() {
       date,
       accuracy: Math.round((data.good / data.total) * 100),
       total: data.total,
+    }));
+
+  const timeTimeline = Object.entries(dailyTime)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, data]) => ({
+      date,
+      avgTimeMs: data.totalMs / data.count,
+      count: data.count,
     }));
 
   // ─── Mastery distribution ───
@@ -400,6 +434,7 @@ async function handleGetAnalytics() {
     analytics: {
       topicStats,
       accuracyTimeline,
+      timeTimeline,
       mastery,
       totalProblems: list.length,
     },

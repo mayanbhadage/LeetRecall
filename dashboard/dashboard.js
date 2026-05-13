@@ -193,7 +193,7 @@ async function loadAnalytics() {
   const res = await sendMsg('GET_ANALYTICS');
   if (!res.success) return;
 
-  const { topicStats, accuracyTimeline, mastery } = res.analytics;
+  const { topicStats, accuracyTimeline, timeTimeline, mastery } = res.analytics;
 
   // Mastery distribution
   document.getElementById('mastery-mastered').textContent = mastery.mastered;
@@ -206,6 +206,11 @@ async function loadAnalytics() {
 
   // Accuracy timeline
   renderAccuracyChart(accuracyTimeline);
+
+  // Time timeline
+  if (timeTimeline) {
+    renderTimeChart(timeTimeline);
+  }
 }
 
 function renderWeakTopics(topicStats) {
@@ -224,11 +229,19 @@ function renderWeakTopics(topicStats) {
     const pct = (t.count / maxCount) * 100;
     const efLabel = getConfidenceLabel(t.avgEfactor);
     const color = t.avgEfactor >= 2.5 ? 'var(--green)' : t.avgEfactor >= 2.0 ? 'var(--accent)' : t.avgEfactor >= 1.5 ? 'var(--orange)' : 'var(--red)';
+    const timeLabel = formatDuration(t.avgTimeMs);
+    const successLabel = t.successRate + '%';
+    
     return `
       <div class="topic-row">
         <div class="topic-header">
           <span class="topic-name">${escapeHtml(t.tag)}</span>
-          <span class="topic-meta">${t.count} problem${t.count > 1 ? 's' : ''} · Avg: <span style="color:${color}">${efLabel}</span></span>
+          <span class="topic-meta">
+            ${t.count} problem${t.count > 1 ? 's' : ''} · 
+            Success: ${successLabel} · 
+            Avg Time: ${timeLabel} · 
+            Confidence: <span style="color:${color}">${efLabel}</span>
+          </span>
         </div>
         <div class="topic-bar-track">
           <div class="topic-bar" style="width: ${pct}%; background: ${color};"></div>
@@ -269,6 +282,36 @@ function renderAccuracyChart(timeline) {
   `;
 }
 
+function renderTimeChart(timeline) {
+  const container = document.getElementById('time-chart');
+  if (!container) return;
+
+  if (!timeline || timeline.length === 0) {
+    container.innerHTML = '<div class="empty-hint">No submission time data yet</div>';
+    return;
+  }
+
+  const maxTotal = Math.max(...timeline.map(d => d.avgTimeMs));
+  const barWidth = Math.max(12, Math.min(28, Math.floor(700 / timeline.length)));
+
+  container.innerHTML = `
+    <div class="accuracy-bars">
+      ${timeline.map(d => {
+        const height = maxTotal > 0 ? Math.max(4, (d.avgTimeMs / maxTotal) * 120) : 4;
+        const color = 'var(--accent)';
+        const date = new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const timeLabel = formatDuration(d.avgTimeMs);
+        return `
+          <div class="accuracy-bar-wrapper" title="${date}: ${timeLabel} (${d.count} solved)">
+            <div class="accuracy-bar" style="height: ${height}px; width: ${barWidth}px; background: ${color};"></div>
+            <div class="accuracy-bar-label">${date.split(' ')[1]}</div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
 // ─── Problems Table ────────────────────────────────────
 
 function populateTagFilter(problems) {
@@ -304,9 +347,26 @@ function renderTable(problems) {
   // Sort
   list.sort((a, b) => {
     let va = a[sortField], vb = b[sortField];
+
+    if (sortField === 'avgTime') {
+      const getAvg = (p) => {
+        if (!p.submissions) return 0;
+        const times = p.submissions.filter(s => s.timeSpentMs > 0).map(s => s.timeSpentMs);
+        return times.length ? times.reduce((acc, curr) => acc + curr, 0) / times.length : 0;
+      };
+      va = getAvg(a);
+      vb = getAvg(b);
+    }
+
+    if (sortField === 'failedAttempts') {
+      va = a.failedAttempts || 0;
+      vb = b.failedAttempts || 0;
+    }
+
     if (sortField === 'title') { va = (va || '').toLowerCase(); vb = (vb || '').toLowerCase(); }
     if (sortField === 'difficulty') { const order = { Easy: 1, Medium: 2, Hard: 3, Unknown: 4 }; va = order[va] || 4; vb = order[vb] || 4; }
     if (typeof va === 'string' && va.includes('T')) { va = new Date(va).getTime(); vb = new Date(vb).getTime(); }
+    
     if (va < vb) return sortDir === 'asc' ? -1 : 1;
     if (va > vb) return sortDir === 'asc' ? 1 : -1;
     return 0;
@@ -325,6 +385,13 @@ function renderTable(problems) {
       `<span class="tag-pill">${escapeHtml(t)}</span>`
     ).join('') + (p.tags && p.tags.length > 3 ? `<span class="tag-more">+${p.tags.length - 3}</span>` : '');
 
+    // Calculate avgTime
+    let avgTimeMs = 0;
+    if (p.submissions && p.submissions.length > 0) {
+      const times = p.submissions.filter(s => s.timeSpentMs > 0).map(s => s.timeSpentMs);
+      if (times.length > 0) avgTimeMs = times.reduce((a, b) => a + b, 0) / times.length;
+    }
+
     return `<tr>
       <td><a href="${p.url}" target="_blank">${escapeHtml(p.title)}</a></td>
       <td><span class="${diffClass}">${p.difficulty}</span></td>
@@ -332,6 +399,8 @@ function renderTable(problems) {
       <td>${formatDate(p.addedAt)}</td>
       <td>${formatDate(p.lastSolvedAt)}</td>
       <td>${getConfidenceLabel(p.efactor)}</td>
+      <td>${formatDuration(avgTimeMs)}</td>
+      <td>${p.failedAttempts || 0}</td>
       <td>${formatDate(p.nextDueDate)}</td>
       <td><button class="btn-delete" data-slug="${p.id}">Delete</button></td>
     </tr>`;
@@ -439,9 +508,22 @@ function sendMsg(type, data = {}) {
   });
 }
 
-function formatDate(dateStr) {
-  if (!dateStr) return '—';
-  return new Date(dateStr).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
+function formatDate(isoStr) {
+  if (!isoStr) return '—';
+  const d = new Date(isoStr);
+  const diff = Date.now() - d.getTime();
+  if (diff < 86400000) return 'Today';
+  if (diff < 172800000) return 'Yesterday';
+  return d.toLocaleDateString();
+}
+
+function formatDuration(ms) {
+  if (!ms || ms <= 0) return '—';
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}m ${s}s`;
 }
 
 function getConfidenceLabel(efactor) {

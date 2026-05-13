@@ -23,6 +23,72 @@
   // Don't react to DOM until page has settled
   setTimeout(() => { pageReady = true; }, PAGE_LOAD_GRACE_MS);
 
+  // ─── Active Time Tracking ─────────────────────────────────────
+  
+  let activeTimeMs = 0;
+  let lastActiveTimestamp = Date.now();
+  let isTrackingActive = true;
+
+  function loadTimeTracker(slug) {
+    chrome.storage.local.get(['leetrecall_time'], (result) => {
+      const times = result.leetrecall_time || {};
+      activeTimeMs = times[slug] || 0;
+      lastActiveTimestamp = Date.now();
+    });
+  }
+
+  function saveTimeTracker(slug) {
+    if (!slug) return;
+    chrome.storage.local.get(['leetrecall_time'], (result) => {
+      const times = result.leetrecall_time || {};
+      times[slug] = activeTimeMs;
+      chrome.storage.local.set({ leetrecall_time: times });
+    });
+  }
+
+  function clearTimeTracker(slug) {
+    chrome.storage.local.get(['leetrecall_time'], (result) => {
+      const times = result.leetrecall_time || {};
+      delete times[slug];
+      chrome.storage.local.set({ leetrecall_time: times });
+    });
+  }
+
+  function updateActiveTime() {
+    if (isTrackingActive) {
+      activeTimeMs += (Date.now() - lastActiveTimestamp);
+    }
+    lastActiveTimestamp = Date.now();
+  }
+
+  function pauseTracking() {
+    if (!isTrackingActive) return;
+    updateActiveTime();
+    isTrackingActive = false;
+    saveTimeTracker(currentSlug);
+  }
+
+  function resumeTracking() {
+    if (isTrackingActive) return;
+    lastActiveTimestamp = Date.now();
+    isTrackingActive = true;
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) pauseTracking();
+    else resumeTracking();
+  });
+
+  window.addEventListener('blur', pauseTracking);
+  window.addEventListener('focus', resumeTracking);
+
+  setInterval(() => {
+    if (isTrackingActive) {
+      updateActiveTime();
+      saveTimeTracker(currentSlug);
+    }
+  }, 10000);
+
   // ─── SPA Navigation Detection ─────────────────────────────────
 
   function getCurrentSlug() {
@@ -31,20 +97,27 @@
     return idx !== -1 ? parts[idx + 1] : '';
   }
 
-  // Monitor URL changes for SPA navigation
   let lastUrl = window.location.href;
   const urlObserver = new MutationObserver(() => {
     if (window.location.href !== lastUrl) {
       lastUrl = window.location.href;
       const newSlug = getCurrentSlug();
       if (newSlug && newSlug !== currentSlug) {
+        pauseTracking(); // save old
         currentSlug = newSlug;
-        // Reset state when navigating to a new problem
+        
+        // Reset state
         isLocked = false;
         lastDetectedSlug = null;
         submissionInFlight = false;
         pageReady = false;
         setTimeout(() => { pageReady = true; }, PAGE_LOAD_GRACE_MS);
+        
+        // Load time tracker for new slug
+        activeTimeMs = 0;
+        loadTimeTracker(newSlug);
+        resumeTracking();
+        
         console.log(`[LeetRecall] Navigated to: ${newSlug}`);
       }
     }
@@ -52,6 +125,9 @@
 
   urlObserver.observe(document.body, { childList: true, subtree: true });
   currentSlug = getCurrentSlug();
+  if (currentSlug) {
+    loadTimeTracker(currentSlug);
+  }
 
   // ─── Fetch Interception (PRIMARY detection) ────────────────────
   // This is the most reliable method — it fires when LeetCode's
@@ -233,7 +309,9 @@
     // Extract problem info and send to service worker
     const problemInfo = Extractor.extractAll();
     problemInfo.status = status;
-    console.log(`[LeetRecall] Submission result: ${status} for ${problemInfo.title}`);
+    updateActiveTime(); // Make sure active time is totally up to date
+    problemInfo.timeSpentMs = activeTimeMs;
+    console.log(`[LeetRecall] Submission result: ${status} for ${problemInfo.title}. Time spent: Math.round(${activeTimeMs} / 1000)s`);
 
     chrome.runtime.sendMessage(
       { type: 'PROBLEM_SUBMITTED', data: problemInfo },
@@ -245,6 +323,10 @@
         if (response?.success) {
           if (status === 'Accepted') {
             showCelebration(problemInfo.title, response.isNew);
+            // Clear timer so a future spaced repetition review starts fresh
+            clearTimeTracker(slug);
+            activeTimeMs = 0;
+            lastActiveTimestamp = Date.now();
           } else {
             showFailureToast(problemInfo.title, status);
           }
