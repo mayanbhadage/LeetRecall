@@ -231,8 +231,10 @@
       // Also check if text changed inside an existing result element
       if (mutation.type === 'characterData' || mutation.type === 'childList') {
         const target = mutation.target;
-        if (target && target.nodeType === Node.ELEMENT_NODE) {
-          const resultEl = target.closest?.('[data-e2e-locator="submission-result"]');
+        const el = target.nodeType === Node.TEXT_NODE ? target.parentElement : target;
+        
+        if (el && el.nodeType === Node.ELEMENT_NODE) {
+          const resultEl = el.closest?.('[data-e2e-locator="submission-result"]');
           if (resultEl) {
             const txt = resultEl.textContent.trim();
             if (txt && !txt.includes('Pending') && !txt.includes('Judging')) {
@@ -608,6 +610,7 @@
   observer.observe(document.body, {
     childList: true,
     subtree: true,
+    characterData: true,
   });
 
   console.log('[LeetRecall] Content script loaded — watching for submissions');
