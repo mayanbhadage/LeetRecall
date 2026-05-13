@@ -6,6 +6,9 @@
  * - SM-2 confidence rating calculations
  * - Badge count updates
  * - Periodic alarm for badge refresh
+ * - Daily notification reminders
+ * - Activity tracking for heatmap
+ * - Topic analytics
  */
 
 // Import shared modules
@@ -31,12 +34,16 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     periodInMinutes: ALARM_INTERVAL_MINUTES,
   });
 
+  // Set up daily reminder alarm
+  await scheduleDailyReminder();
+
   // Initial badge update
   await updateBadge();
 });
 
 chrome.runtime.onStartup.addListener(async () => {
   await updateBadge();
+  await scheduleDailyReminder();
 });
 
 // ─── Alarm Handler ─────────────────────────────────────────────────
@@ -44,6 +51,11 @@ chrome.runtime.onStartup.addListener(async () => {
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === ALARM_NAME) {
     await updateBadge();
+  }
+  if (alarm.name === REMINDER_ALARM_NAME) {
+    await sendDailyReminder();
+    // Reschedule for tomorrow
+    await scheduleDailyReminder();
   }
 });
 
@@ -95,6 +107,12 @@ async function handleMessage(message, sender) {
     case 'IMPORT_DATA':
       return await handleImportData(message.data);
 
+    case 'GET_ANALYTICS':
+      return await handleGetAnalytics();
+
+    case 'GET_ACTIVITY':
+      return await handleGetActivity();
+
     default:
       return { success: false, error: `Unknown message type: ${message.type}` };
   }
@@ -112,6 +130,12 @@ async function handleProblemAccepted(data) {
     // Already tracked — update solve count and timestamp
     problem.solveCount += 1;
     problem.lastSolvedAt = new Date().toISOString();
+    // Merge new tags if any are found
+    if (tags && tags.length > 0) {
+      const existing = problem.tags || [];
+      const merged = [...new Set([...existing, ...tags])];
+      problem.tags = merged;
+    }
     await Storage.saveProblem(slug, problem);
     console.log(`[LeetRecall] Updated existing problem: ${title}`);
   } else {
@@ -128,8 +152,11 @@ async function handleProblemAccepted(data) {
     console.log(`[LeetRecall] Tracked new problem: ${title}`);
   }
 
+  // Track activity
+  await Storage.recordActivity('solved');
+
   await updateBadge();
-  return { success: true, problem };
+  return { success: true, problem, isNew: !data._existing };
 }
 
 async function handleRateConfidence({ slug, rating }) {
@@ -161,6 +188,9 @@ async function handleRateConfidence({ slug, rating }) {
   stats.totalReviews += 1;
   await updateStreak(stats);
   await Storage.saveStats(stats);
+
+  // Track activity
+  await Storage.recordActivity('reviewed');
 
   await updateBadge();
 
@@ -212,6 +242,10 @@ async function handleGetSettings() {
 
 async function handleSaveSettings(settings) {
   await Storage.saveSettings(settings);
+  // If reminder time changed, reschedule
+  if (settings.reminderTime !== undefined) {
+    await scheduleDailyReminder();
+  }
   return { success: true };
 }
 
@@ -231,6 +265,7 @@ async function handleAddManual(data) {
   await updateStreak(stats);
   await Storage.saveStats(stats);
 
+  await Storage.recordActivity('solved');
   await updateBadge();
   return { success: true, problem };
 }
@@ -239,15 +274,17 @@ async function handleExportData() {
   const problems = await Storage.getProblems();
   const settings = await Storage.getSettings();
   const stats = await Storage.getStats();
+  const activity = await Storage.getActivity();
 
   return {
     success: true,
     data: {
-      version: '1.0.0',
+      version: '1.1.0',
       exportedAt: new Date().toISOString(),
       problems,
       settings,
       stats,
+      activity,
     },
   };
 }
@@ -256,10 +293,142 @@ async function handleImportData(data) {
   if (data.problems) await Storage.setProblems(data.problems);
   if (data.settings) await Storage.saveSettings(data.settings);
   if (data.stats) await Storage.saveStats(data.stats);
+  if (data.activity) {
+    await chrome.storage.local.set({ [STORAGE_KEYS.ACTIVITY]: data.activity });
+  }
 
   await updateBadge();
   return { success: true };
 }
+
+async function handleGetAnalytics() {
+  const problems = await Storage.getProblems();
+  const list = Object.values(problems);
+
+  // ─── Topic Stats ───
+  const topicMap = {};  // tag → { total, avgEfactor, ratings }
+  list.forEach(p => {
+    (p.tags || []).forEach(tag => {
+      if (!topicMap[tag]) topicMap[tag] = { count: 0, totalEfactor: 0, ratings: [], problems: [] };
+      topicMap[tag].count++;
+      topicMap[tag].totalEfactor += p.efactor;
+      topicMap[tag].problems.push(p.id);
+      (p.history || []).forEach(h => topicMap[tag].ratings.push(h.rating));
+    });
+  });
+
+  const topicStats = Object.entries(topicMap).map(([tag, data]) => {
+    const avgEfactor = data.totalEfactor / data.count;
+    const avgRating = data.ratings.length > 0
+      ? data.ratings.reduce((a, b) => a + b, 0) / data.ratings.length
+      : 0;
+    return {
+      tag,
+      count: data.count,
+      avgEfactor: Math.round(avgEfactor * 100) / 100,
+      avgRating: Math.round(avgRating * 100) / 100,
+      weakScore: Math.round((3 - avgEfactor) * 100) / 100, // higher = weaker
+    };
+  }).sort((a, b) => b.weakScore - a.weakScore);
+
+  // ─── Accuracy Over Time (last 30 days) ───
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const dailyAccuracy = {};
+
+  list.forEach(p => {
+    (p.history || []).forEach(h => {
+      const day = h.date.split('T')[0];
+      if (new Date(day) >= thirtyDaysAgo) {
+        if (!dailyAccuracy[day]) dailyAccuracy[day] = { good: 0, total: 0 };
+        dailyAccuracy[day].total++;
+        if (h.rating >= 3) dailyAccuracy[day].good++;
+      }
+    });
+  });
+
+  const accuracyTimeline = Object.entries(dailyAccuracy)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, data]) => ({
+      date,
+      accuracy: Math.round((data.good / data.total) * 100),
+      total: data.total,
+    }));
+
+  // ─── Mastery distribution ───
+  const mastery = { mastered: 0, learning: 0, struggling: 0, new: 0 };
+  list.forEach(p => {
+    if (p.efactor >= 2.5 && p.repetition >= 3) mastery.mastered++;
+    else if (p.efactor >= 2.0) mastery.learning++;
+    else if (p.repetition > 0) mastery.struggling++;
+    else mastery.new++;
+  });
+
+  return {
+    success: true,
+    analytics: {
+      topicStats,
+      accuracyTimeline,
+      mastery,
+      totalProblems: list.length,
+    },
+  };
+}
+
+async function handleGetActivity() {
+  const activity = await Storage.getActivity();
+  return { success: true, activity };
+}
+
+// ─── Notifications ─────────────────────────────────────────────────
+
+async function scheduleDailyReminder() {
+  // Clear existing reminder
+  await chrome.alarms.clear(REMINDER_ALARM_NAME);
+
+  const settings = await Storage.getSettings();
+  if (!settings.notificationsEnabled) return;
+
+  const [hours, minutes] = (settings.reminderTime || '09:00').split(':').map(Number);
+  const now = new Date();
+  const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0);
+
+  // If target time has passed today, schedule for tomorrow
+  if (target <= now) {
+    target.setDate(target.getDate() + 1);
+  }
+
+  const delayMinutes = (target - now) / (1000 * 60);
+  chrome.alarms.create(REMINDER_ALARM_NAME, {
+    delayInMinutes: delayMinutes,
+  });
+
+  console.log(`[LeetRecall] Daily reminder scheduled for ${target.toLocaleString()}`);
+}
+
+async function sendDailyReminder() {
+  const settings = await Storage.getSettings();
+  if (!settings.notificationsEnabled) return;
+
+  const dueProblems = await Storage.getDueProblems();
+  if (dueProblems.length === 0) return;
+
+  chrome.notifications.create('leetrecall_daily', {
+    type: 'basic',
+    iconUrl: chrome.runtime.getURL('icons/icon-128.png'),
+    title: '🧠 LeetRecall — Time to Review!',
+    message: `You have ${dueProblems.length} problem${dueProblems.length > 1 ? 's' : ''} due for review today.`,
+    priority: 1,
+  });
+}
+
+// Open popup/dashboard when notification is clicked
+chrome.notifications.onClicked.addListener((notificationId) => {
+  if (notificationId === 'leetrecall_daily') {
+    chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html') });
+    chrome.notifications.clear(notificationId);
+  }
+});
 
 // ─── Helpers ───────────────────────────────────────────────────────
 

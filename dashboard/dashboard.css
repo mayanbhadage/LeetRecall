@@ -21,6 +21,7 @@ body { min-height: 100vh; }
 /* Cards */
 .card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: var(--space-6); margin-bottom: var(--space-5); }
 .card-title { font-size: var(--font-md); font-weight: 600; margin-bottom: var(--space-5); color: var(--text-primary); }
+.card-subtitle { font-size: var(--font-sm); color: var(--text-tertiary); margin-top: -12px; margin-bottom: var(--space-5); }
 
 /* Stats Row */
 .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-4); margin-bottom: var(--space-5); }
@@ -35,6 +36,70 @@ body { min-height: 100vh; }
 .progress-bar-lg { height: 100%; background: linear-gradient(90deg, var(--accent), var(--green)); border-radius: var(--radius-full); transition: width 0.5s var(--ease-out); }
 .progress-text { font-size: var(--font-sm); color: var(--text-tertiary); text-align: center; }
 
+/* ─── Activity Heatmap ─────────────────────────────────── */
+
+.heatmap-container { overflow-x: auto; padding: var(--space-2) 0; }
+.heatmap-grid { display: flex; gap: 3px; }
+.heatmap-label-col { display: flex; flex-direction: column; gap: 3px; }
+.heatmap-day-label { width: 28px; height: 13px; font-size: 9px; color: var(--text-tertiary); display: flex; align-items: center; }
+.heatmap-col { display: flex; flex-direction: column; gap: 3px; }
+.heatmap-cell { width: 13px; height: 13px; border-radius: 2px; transition: transform var(--duration-fast); cursor: default; }
+.heatmap-cell:hover { transform: scale(1.4); z-index: 2; }
+.heatmap-legend { display: flex; align-items: center; gap: 4px; margin-top: var(--space-3); justify-content: flex-end; }
+.heatmap-legend .heatmap-cell { width: 11px; height: 11px; cursor: default; }
+.heatmap-legend .heatmap-cell:hover { transform: none; }
+.heatmap-legend-label { font-size: 10px; color: var(--text-tertiary); }
+
+/* ─── Mastery Distribution ─────────────────────────────── */
+
+.mastery-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-4); }
+.mastery-card { padding: var(--space-5); border-radius: var(--radius-lg); text-align: center; border: 1px solid var(--border-subtle); transition: border-color var(--duration-fast); }
+.mastery-card:hover { border-color: var(--border-default); }
+.mastery-count { font-size: var(--font-2xl); font-weight: 700; margin-bottom: var(--space-1); }
+.mastery-label { font-size: var(--font-sm); font-weight: 600; margin-bottom: 2px; }
+.mastery-desc { font-size: var(--font-xs); color: var(--text-tertiary); }
+
+.mastery-mastered { background: rgba(34, 197, 94, 0.06); }
+.mastery-mastered .mastery-count { color: var(--green); }
+.mastery-mastered .mastery-label { color: var(--green); }
+
+.mastery-learning { background: rgba(59, 130, 246, 0.06); }
+.mastery-learning .mastery-count { color: var(--blue); }
+.mastery-learning .mastery-label { color: var(--blue); }
+
+.mastery-struggling { background: rgba(249, 115, 22, 0.06); }
+.mastery-struggling .mastery-count { color: var(--orange); }
+.mastery-struggling .mastery-label { color: var(--orange); }
+
+.mastery-new { background: rgba(245, 158, 11, 0.06); }
+.mastery-new .mastery-count { color: var(--accent); }
+.mastery-new .mastery-label { color: var(--accent); }
+
+/* ─── Topic Analytics ──────────────────────────────────── */
+
+.topic-row { margin-bottom: var(--space-4); }
+.topic-row:last-child { margin-bottom: 0; }
+.topic-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--space-2); }
+.topic-name { font-size: var(--font-sm); font-weight: 600; color: var(--text-primary); }
+.topic-meta { font-size: var(--font-xs); color: var(--text-tertiary); }
+.topic-bar-track { height: 6px; background: var(--bg-elevated); border-radius: var(--radius-full); overflow: hidden; }
+.topic-bar { height: 100%; border-radius: var(--radius-full); transition: width 0.5s var(--ease-out); }
+
+/* ─── Accuracy Chart ───────────────────────────────────── */
+
+.accuracy-bars { display: flex; align-items: flex-end; gap: 4px; height: 140px; padding-bottom: var(--space-4); border-bottom: 1px solid var(--border-subtle); overflow-x: auto; }
+.accuracy-bar-wrapper { display: flex; flex-direction: column; align-items: center; gap: 4px; flex-shrink: 0; }
+.accuracy-bar { border-radius: 3px 3px 0 0; transition: height 0.3s var(--ease-out); min-height: 4px; }
+.accuracy-bar-wrapper:hover .accuracy-bar { opacity: 0.8; }
+.accuracy-bar-label { font-size: 8px; color: var(--text-tertiary); transform: rotate(-45deg); white-space: nowrap; }
+.accuracy-scale { display: flex; justify-content: space-between; padding-top: var(--space-2); font-size: var(--font-xs); color: var(--text-tertiary); }
+
+/* ─── Tag Pills ────────────────────────────────────────── */
+
+.tags-cell { max-width: 200px; }
+.tag-pill { display: inline-block; padding: 1px 8px; margin: 1px 2px; background: var(--accent-muted); color: var(--accent); border-radius: var(--radius-full); font-size: 10px; font-weight: 500; white-space: nowrap; }
+.tag-more { font-size: 10px; color: var(--text-tertiary); margin-left: 2px; }
+
 /* Difficulty Bars */
 .diff-row { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
 .diff-row:last-child { margin-bottom: 0; }
@@ -48,7 +113,7 @@ body { min-height: 100vh; }
 
 /* Table */
 .table-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-5); flex-wrap: wrap; gap: var(--space-3); }
-.table-controls { display: flex; gap: var(--space-3); }
+.table-controls { display: flex; gap: var(--space-3); flex-wrap: wrap; }
 .search-input { padding: var(--space-2) var(--space-3); background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); color: var(--text-primary); font-size: var(--font-sm); font-family: var(--font-family); width: 200px; transition: border-color var(--duration-fast); }
 .search-input:focus { outline: none; border-color: var(--accent); }
 .search-input::placeholder { color: var(--text-tertiary); }
@@ -75,6 +140,7 @@ body { min-height: 100vh; }
 .empty-table .empty-icon { font-size: 40px; margin-bottom: var(--space-3); }
 .empty-table .empty-title { font-size: var(--font-lg); font-weight: 600; margin-bottom: var(--space-2); }
 .empty-table .empty-message { color: var(--text-tertiary); }
+.empty-hint { font-size: var(--font-sm); color: var(--text-tertiary); text-align: center; padding: var(--space-6); }
 
 /* Settings */
 .settings-group { display: flex; flex-direction: column; }
@@ -84,6 +150,7 @@ body { min-height: 100vh; }
 .setting-desc { font-size: var(--font-xs); color: var(--text-tertiary); }
 .setting-input { width: 70px; padding: var(--space-2); background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); color: var(--text-primary); font-size: var(--font-md); text-align: center; font-family: var(--font-family); }
 .setting-input:focus { outline: none; border-color: var(--accent); }
+.setting-time { width: 100px; }
 
 /* Toggle */
 .toggle { position: relative; width: 44px; height: 24px; cursor: pointer; }
@@ -103,6 +170,7 @@ body { min-height: 100vh; }
 /* Responsive */
 @media (max-width: 700px) {
   .stats-row { grid-template-columns: repeat(2, 1fr); }
+  .mastery-grid { grid-template-columns: repeat(2, 1fr); }
   .table-header { flex-direction: column; align-items: stretch; }
   .table-controls { flex-direction: column; }
   .search-input { width: 100%; }

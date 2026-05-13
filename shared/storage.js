@@ -119,4 +119,27 @@ const Storage = {
       .filter(p => new Date(p.nextDueDate) > endOfDay)
       .sort((a, b) => new Date(a.nextDueDate) - new Date(b.nextDueDate));
   },
+
+  // ─── Activity Heatmap ──────────────────────────────────
+
+  /**
+   * Get activity log: { 'YYYY-MM-DD': { solved: N, reviewed: N } }
+   * @returns {Promise<object>}
+   */
+  async getActivity() {
+    const result = await chrome.storage.local.get(STORAGE_KEYS.ACTIVITY);
+    return result[STORAGE_KEYS.ACTIVITY] || {};
+  },
+
+  /**
+   * Record activity for today.
+   * @param {'solved'|'reviewed'} type
+   */
+  async recordActivity(type) {
+    const activity = await this.getActivity();
+    const today = new Date().toISOString().split('T')[0];
+    if (!activity[today]) activity[today] = { solved: 0, reviewed: 0 };
+    activity[today][type] = (activity[today][type] || 0) + 1;
+    await chrome.storage.local.set({ [STORAGE_KEYS.ACTIVITY]: activity });
+  },
 };

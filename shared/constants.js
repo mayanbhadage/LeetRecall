@@ -6,11 +6,13 @@ const STORAGE_KEYS = {
   PROBLEMS: 'leetrecall_problems',
   SETTINGS: 'leetrecall_settings',
   STATS: 'leetrecall_stats',
+  ACTIVITY: 'leetrecall_activity',  // daily activity log for heatmap
 };
 
 const DEFAULT_SETTINGS = {
   dailyGoal: 5,
   notificationsEnabled: true,
+  reminderTime: '09:00',     // when to send daily reminder
   theme: 'dark',
 };
 
@@ -38,3 +40,4 @@ const QUALITY_MAP = {
 
 const ALARM_NAME = 'leetrecall_badge_refresh';
 const ALARM_INTERVAL_MINUTES = 30;
+const REMINDER_ALARM_NAME = 'leetrecall_daily_reminder';

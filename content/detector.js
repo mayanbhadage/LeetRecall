@@ -5,15 +5,44 @@
  * 1. DOM MutationObserver (primary)
  * 2. Fetch/XHR interception (fallback)
  * 
- * Sends detected acceptances to the service worker.
+ * Handles SPA navigation (LeetCode is a React SPA).
+ * Shows celebration animation on first accepted submission.
  */
 
 (function () {
   'use strict';
 
   let lastDetectedSlug = null;
-  let debounceTimer = null;
-  const DEBOUNCE_MS = 3000; // Prevent duplicate detections within 3 seconds
+  let isLocked = false;         // Hard lock to prevent any re-entry
+  const DEBOUNCE_MS = 10000;    // Block duplicate detections for 10 seconds
+  let currentSlug = null;       // Track current problem for SPA navigation
+
+  // ─── SPA Navigation Detection ─────────────────────────────────
+
+  function getCurrentSlug() {
+    const parts = window.location.pathname.split('/');
+    const idx = parts.indexOf('problems');
+    return idx !== -1 ? parts[idx + 1] : '';
+  }
+
+  // Monitor URL changes for SPA navigation
+  let lastUrl = window.location.href;
+  const urlObserver = new MutationObserver(() => {
+    if (window.location.href !== lastUrl) {
+      lastUrl = window.location.href;
+      const newSlug = getCurrentSlug();
+      if (newSlug && newSlug !== currentSlug) {
+        currentSlug = newSlug;
+        // Reset lock when navigating to a new problem
+        isLocked = false;
+        lastDetectedSlug = null;
+        console.log(`[LeetRecall] Navigated to: ${newSlug}`);
+      }
+    }
+  });
+
+  urlObserver.observe(document.body, { childList: true, subtree: true });
+  currentSlug = getCurrentSlug();
 
   // ─── Primary: DOM Observer ─────────────────────────────────────
 
@@ -37,7 +66,6 @@
 
   function checkForAccepted(node) {
     const text = node.textContent || '';
-    const html = node.innerHTML || '';
 
     // Look for the "Accepted" result — LeetCode shows this in green
     const isAccepted =
@@ -96,14 +124,15 @@
     const slug = Extractor.getSlug();
     if (!slug) return;
 
-    // Debounce — prevent duplicate detections
-    if (slug === lastDetectedSlug && debounceTimer) {
+    // Hard lock — block ALL duplicate detections
+    if (isLocked && slug === lastDetectedSlug) {
       return;
     }
 
+    isLocked = true;
     lastDetectedSlug = slug;
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
+    setTimeout(() => {
+      isLocked = false;
       lastDetectedSlug = null;
     }, DEBOUNCE_MS);
 
@@ -119,7 +148,7 @@
           return;
         }
         if (response?.success) {
-          showNotification(problemInfo.title);
+          showCelebration(problemInfo.title, response.isNew);
         }
       }
     );
@@ -152,17 +181,26 @@
     return response;
   };
 
-  // ─── In-Page Notification ──────────────────────────────────────
+  // ─── Celebration Animation ─────────────────────────────────────
 
-  function showNotification(title) {
-    // Create a small toast notification on the page
+  function showCelebration(title, isNew) {
+    // Remove any existing toast/celebration to prevent stacking
+    const existing = document.querySelector('.leetrecall-toast');
+    if (existing) existing.remove();
+    const existingOverlay = document.querySelector('.leetrecall-confetti-overlay');
+    if (existingOverlay) existingOverlay.remove();
+
+    // Create confetti burst
+    createConfetti();
+
+    // Create toast notification
     const toast = document.createElement('div');
     toast.className = 'leetrecall-toast';
     toast.innerHTML = `
       <div class="leetrecall-toast-icon">🧠</div>
       <div class="leetrecall-toast-content">
-        <div class="leetrecall-toast-title">LeetRecall</div>
-        <div class="leetrecall-toast-message">Tracked: ${title}</div>
+        <div class="leetrecall-toast-title">LeetRecall${isNew ? ' ✨' : ''}</div>
+        <div class="leetrecall-toast-message">${isNew ? 'Tracked' : 'Updated'}: ${title}</div>
       </div>
     `;
 
@@ -173,11 +211,37 @@
       toast.classList.add('leetrecall-toast-show');
     });
 
-    // Remove after 3 seconds
+    // Remove after 4 seconds
     setTimeout(() => {
       toast.classList.add('leetrecall-toast-hide');
       setTimeout(() => toast.remove(), 400);
-    }, 3000);
+    }, 4000);
+  }
+
+  function createConfetti() {
+    const overlay = document.createElement('div');
+    overlay.className = 'leetrecall-confetti-overlay';
+    document.body.appendChild(overlay);
+
+    const colors = ['#f59e0b', '#22c55e', '#3b82f6', '#ef4444', '#a855f7', '#fbbf24'];
+    const shapes = ['●', '■', '▲', '★'];
+
+    for (let i = 0; i < 40; i++) {
+      const particle = document.createElement('div');
+      particle.className = 'leetrecall-confetti-particle';
+      particle.textContent = shapes[Math.floor(Math.random() * shapes.length)];
+      particle.style.cssText = `
+        left: ${Math.random() * 100}%;
+        color: ${colors[Math.floor(Math.random() * colors.length)]};
+        animation-delay: ${Math.random() * 0.5}s;
+        animation-duration: ${1.5 + Math.random() * 1.5}s;
+        font-size: ${8 + Math.random() * 14}px;
+      `;
+      overlay.appendChild(particle);
+    }
+
+    // Clean up after animation
+    setTimeout(() => overlay.remove(), 3500);
   }
 
   // ─── Start Observing ──────────────────────────────────────────

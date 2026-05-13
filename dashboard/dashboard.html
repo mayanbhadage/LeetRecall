@@ -17,6 +17,7 @@
       </div>
       <nav class="topbar-nav">
         <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+        <button class="tab-btn" data-tab="analytics">Analytics</button>
         <button class="tab-btn" data-tab="problems">All Problems</button>
         <button class="tab-btn" data-tab="settings">Settings</button>
       </nav>
@@ -53,6 +54,21 @@
         <div class="progress-text" id="dash-progress-text">No reviews due</div>
       </section>
 
+      <!-- Activity Heatmap -->
+      <section class="card">
+        <h2 class="card-title">Activity — Last 16 Weeks</h2>
+        <div class="heatmap-container" id="heatmap-container"></div>
+        <div class="heatmap-legend">
+          <span class="heatmap-legend-label">Less</span>
+          <span class="heatmap-cell" style="background: var(--bg-elevated);" title="0"></span>
+          <span class="heatmap-cell" style="background: rgba(245, 158, 11, 0.2);" title="1-2"></span>
+          <span class="heatmap-cell" style="background: rgba(245, 158, 11, 0.45);" title="3-4"></span>
+          <span class="heatmap-cell" style="background: rgba(245, 158, 11, 0.7);" title="5-6"></span>
+          <span class="heatmap-cell" style="background: #f59e0b;" title="7+"></span>
+          <span class="heatmap-legend-label">More</span>
+        </div>
+      </section>
+
       <!-- Difficulty Breakdown -->
       <section class="card">
         <h2 class="card-title">Difficulty Breakdown</h2>
@@ -76,6 +92,53 @@
       </section>
     </main>
 
+    <!-- Analytics Tab -->
+    <main class="tab-content" id="tab-analytics">
+      <!-- Mastery Distribution -->
+      <section class="card">
+        <h2 class="card-title">Mastery Distribution</h2>
+        <div class="mastery-grid" id="mastery-grid">
+          <div class="mastery-card mastery-mastered">
+            <div class="mastery-count" id="mastery-mastered">0</div>
+            <div class="mastery-label">Mastered</div>
+            <div class="mastery-desc">EF ≥ 2.5 & 3+ reviews</div>
+          </div>
+          <div class="mastery-card mastery-learning">
+            <div class="mastery-count" id="mastery-learning">0</div>
+            <div class="mastery-label">Learning</div>
+            <div class="mastery-desc">EF ≥ 2.0</div>
+          </div>
+          <div class="mastery-card mastery-struggling">
+            <div class="mastery-count" id="mastery-struggling">0</div>
+            <div class="mastery-label">Struggling</div>
+            <div class="mastery-desc">Active, EF < 2.0</div>
+          </div>
+          <div class="mastery-card mastery-new">
+            <div class="mastery-count" id="mastery-new">0</div>
+            <div class="mastery-label">New</div>
+            <div class="mastery-desc">Not yet reviewed</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Weakest Topics -->
+      <section class="card">
+        <h2 class="card-title">Weakest Topics</h2>
+        <p class="card-subtitle">Topics where you need the most practice, ranked by difficulty</p>
+        <div id="weak-topics-container">
+          <div class="empty-hint">Solve more problems to see topic analytics</div>
+        </div>
+      </section>
+
+      <!-- Accuracy Over Time -->
+      <section class="card">
+        <h2 class="card-title">Review Accuracy — Last 30 Days</h2>
+        <div class="accuracy-chart" id="accuracy-chart">
+          <div class="empty-hint">No review data yet</div>
+        </div>
+      </section>
+    </main>
+
     <!-- Problems Tab -->
     <main class="tab-content" id="tab-problems">
       <section class="card">
@@ -89,6 +152,9 @@
               <option value="Medium">Medium</option>
               <option value="Hard">Hard</option>
             </select>
+            <select class="filter-select" id="filter-tag">
+              <option value="all">All Topics</option>
+            </select>
           </div>
         </div>
         <div class="table-wrapper">
@@ -97,6 +163,7 @@
               <tr>
                 <th class="sortable" data-sort="title">Title</th>
                 <th class="sortable" data-sort="difficulty">Difficulty</th>
+                <th>Tags</th>
                 <th class="sortable" data-sort="addedAt">Added</th>
                 <th class="sortable" data-sort="lastSolvedAt">Last Solved</th>
                 <th class="sortable" data-sort="efactor">Confidence</th>
@@ -136,6 +203,13 @@
               <input type="checkbox" id="setting-notifications" checked>
               <span class="toggle-slider"></span>
             </label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-label">Reminder Time</div>
+              <div class="setting-desc">When to receive daily review reminders</div>
+            </div>
+            <input type="time" class="setting-input setting-time" id="setting-reminder-time" value="09:00">
           </div>
         </div>
       </section>
