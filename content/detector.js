@@ -201,61 +201,36 @@
       const text = btn.textContent.toLowerCase();
       const locator = btn.getAttribute('data-e2e-locator') || '';
       if (text.includes('submit') || locator.includes('submit')) {
-        submissionInFlight = true;
-        setTimeout(() => { submissionInFlight = false; }, 30000);
+        startSubmission();
       }
     }
   }, true);
 
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      submissionInFlight = true;
-      setTimeout(() => { submissionInFlight = false; }, 30000);
+      startSubmission();
     }
   }, true);
+
+  function startSubmission() {
+    submissionInFlight = true;
+    setTimeout(() => { submissionInFlight = false; }, 30000);
+    
+    // Completely prevent false positives by renaming the old result element
+    const oldResult = document.querySelector('[data-e2e-locator="submission-result"]');
+    if (oldResult) {
+      oldResult.removeAttribute('data-e2e-locator');
+      oldResult.setAttribute('data-old-result', 'true');
+    }
+  }
 
   // ─── DOM Observer (BACKUP — only when submission is in flight) ─
 
   const observer = new MutationObserver((mutations) => {
     if (!pageReady || !submissionInFlight) return;
 
-    for (const mutation of mutations) {
-      if (mutation.addedNodes.length > 0) {
-        for (const node of mutation.addedNodes) {
-          if (node.nodeType === Node.ELEMENT_NODE) {
-            checkForSubmissionResult(node);
-          }
-        }
-      }
-      
-      // Also check if text changed inside an existing result element
-      if (mutation.type === 'characterData' || mutation.type === 'childList') {
-        const target = mutation.target;
-        const el = target.nodeType === Node.TEXT_NODE ? target.parentElement : target;
-        
-        if (el && el.nodeType === Node.ELEMENT_NODE) {
-          const resultEl = el.closest?.('[data-e2e-locator="submission-result"]');
-          if (resultEl) {
-            const txt = resultEl.textContent.trim();
-            if (txt && !txt.includes('Pending') && !txt.includes('Judging')) {
-              submissionInFlight = false;
-              processStatus(txt);
-              return;
-            }
-          }
-        }
-      }
-    }
-  });
-
-  function checkForSubmissionResult(node) {
-    let resultEl = null;
-    if (node.matches && node.matches('[data-e2e-locator="submission-result"]')) {
-      resultEl = node;
-    } else if (node.querySelector) {
-      resultEl = node.querySelector('[data-e2e-locator="submission-result"]');
-    }
-
+    // Fast global check on any mutation if submission is in flight
+    const resultEl = document.querySelector('[data-e2e-locator="submission-result"]');
     if (resultEl) {
       const txt = resultEl.textContent.trim();
       if (txt && !txt.includes('Pending') && !txt.includes('Judging')) {
@@ -264,27 +239,7 @@
         return;
       }
     }
-
-    const text = node.textContent || '';
-    if (!text) return;
-
-    if (text.includes('Accepted') && !text.includes('Not Accepted')) {
-      if (document.body.innerText.includes('Runtime') || document.body.innerText.includes('Memory')) {
-        submissionInFlight = false;
-        processStatus('Accepted');
-        return;
-      }
-    }
-
-    const failures = ['Wrong Answer', 'Time Limit Exceeded', 'Memory Limit Exceeded', 'Runtime Error', 'Compile Error', 'Output Limit Exceeded'];
-    for (const failure of failures) {
-      if (text === failure || text.startsWith(failure + '\n') || text.startsWith(failure + ' ')) {
-        submissionInFlight = false;
-        processStatus(failure);
-        return;
-      }
-    }
-  }
+  });
 
   function processStatus(rawText) {
     let status = rawText;
