@@ -29,6 +29,19 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     await Storage.saveStats(DEFAULT_STATS);
   }
 
+  // Sync: pull from other devices, then push local state
+  try {
+    const result = await Storage.syncPull();
+    if (result.added > 0 || result.merged > 0) {
+      console.log(`[LeetRecall] Sync on install: ${result.added} added, ${result.merged} merged`);
+    }
+    // Push local state so other devices pick up changes
+    const problems = await Storage.getProblems();
+    await Storage.syncPush(problems);
+  } catch (e) {
+    console.warn('[LeetRecall] Initial sync failed:', e.message);
+  }
+
   // Set up periodic alarm for badge refresh
   chrome.alarms.create(ALARM_NAME, {
     periodInMinutes: ALARM_INTERVAL_MINUTES,
@@ -42,8 +55,38 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 });
 
 chrome.runtime.onStartup.addListener(async () => {
+  // Pull sync data from other devices on browser startup
+  try {
+    const result = await Storage.syncPull();
+    if (result.added > 0 || result.merged > 0) {
+      console.log(`[LeetRecall] Sync on startup: ${result.added} added, ${result.merged} merged`);
+    }
+  } catch (e) {
+    console.warn('[LeetRecall] Startup sync failed:', e.message);
+  }
+
   await updateBadge();
   await scheduleDailyReminder();
+});
+
+// ─── Sync Change Listener ─────────────────────────────────────────
+// Receive real-time updates when another Chrome instance pushes sync data
+
+chrome.storage.onChanged.addListener(async (changes, areaName) => {
+  if (areaName !== 'sync') return;
+  // Only react to our sync chunks
+  const hasOurData = Object.keys(changes).some(k => k.startsWith('lr_sync_'));
+  if (!hasOurData) return;
+
+  console.log('[LeetRecall] Sync data changed from another device — pulling...');
+  try {
+    const result = await Storage.syncPull();
+    if (result.added > 0 || result.merged > 0) {
+      await updateBadge();
+    }
+  } catch (e) {
+    console.warn('[LeetRecall] Sync change pull failed:', e.message);
+  }
 });
 
 // ─── Alarm Handler ─────────────────────────────────────────────────
@@ -119,6 +162,13 @@ async function handleMessage(message, sender) {
     case 'SAVE_NOTES':
       return await handleSaveNotes(message.data);
 
+    case 'UPDATE_PROBLEM_TAGS':
+      return await handleUpdateProblemTags(message.data);
+
+    case 'OPEN_DASHBOARD':
+      chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html') });
+      return { success: true };
+
     default:
       return { success: false, error: `Unknown message type: ${message.type}` };
   }
@@ -128,6 +178,8 @@ async function handleMessage(message, sender) {
 
 async function handleProblemSubmitted(data) {
   const { slug, title, url, difficulty, tags, status } = data;
+  const frontendId = data.frontendId || data.questionFrontendId || data.problemNumber || '';
+  const submittedTags = normalizeTags(tags);
   const isAccepted = status === 'Accepted';
   
   let problem = await Storage.getProblem(slug);
@@ -141,15 +193,28 @@ async function handleProblemSubmitted(data) {
       problem.failedAttempts = (problem.failedAttempts || 0) + 1;
     }
 
-    if (tags && tags.length > 0) {
+    // Fix broken titles/difficulties retroactively
+    if (difficulty && difficulty !== 'Unknown') {
+      problem.difficulty = difficulty;
+    }
+    if (frontendId) {
+      problem.frontendId = frontendId;
+    }
+    if (title && isNaN(Number(title))) {
+      problem.title = typeof formatProblemTitle === 'function'
+        ? formatProblemTitle(problem.frontendId || frontendId, title)
+        : title;
+    }
+
+    if (submittedTags.length > 0) {
       const existing = problem.tags || [];
-      const merged = [...new Set([...existing, ...tags])];
+      const merged = mergeTags(existing, submittedTags);
       problem.tags = merged;
     }
     console.log(`[LeetRecall] Updated existing problem: ${title} (${status})`);
   } else {
     isNew = true;
-    problem = createProblemRecord(data);
+    problem = createProblemRecord({ ...data, tags: submittedTags });
     
     if (!isAccepted) {
       problem.solveCount = 0;
@@ -176,26 +241,36 @@ async function handleProblemSubmitted(data) {
 
   if (isAccepted) {
     await Storage.recordActivity('solved');
+  } else {
+    await Storage.recordActivity('attempted');
   }
 
   await updateBadge();
   return { success: true, problem, isNew };
 }
 
-async function handleRateConfidence({ slug, rating, notes }) {
+async function handleRateConfidence(data) {
+  const { slug, rating, notes, customTags } = data;
+  if (!slug || !rating) return { success: false, error: 'Missing slug or rating' };
+
   const problem = await Storage.getProblem(slug);
-  if (!problem) {
-    return { success: false, error: 'Problem not found' };
+  if (!problem) return { success: false, error: 'Problem not found' };
+
+  // Calculate new SM-2 schedule
+  const result = calculateSM2(problem, rating);
+  
+  // Update problem SM-2 data
+  problem.repetition = result.repetition;
+  problem.interval = result.interval;
+  problem.efactor = result.efactor;
+  problem.nextDueDate = result.nextDueDate;
+
+  // Append custom tags if provided
+  const normalizedCustomTags = normalizeTags(customTags);
+  if (normalizedCustomTags.length > 0) {
+    problem.tags = mergeTags(problem.tags || [], normalizedCustomTags);
   }
 
-  // Run SM-2
-  const sm2Result = calculateSM2(problem, rating);
-  
-  // Update problem
-  problem.repetition = sm2Result.repetition;
-  problem.interval = sm2Result.interval;
-  problem.efactor = sm2Result.efactor;
-  problem.nextDueDate = sm2Result.nextDueDate;
   problem.lastSolvedAt = new Date().toISOString();
   
   // Add to history (now includes notes)
@@ -224,7 +299,7 @@ async function handleRateConfidence({ slug, rating, notes }) {
 
   await updateBadge();
 
-  console.log(`[LeetRecall] Rated ${problem.title}: ${CONFIDENCE_LABELS[rating]} → next in ${sm2Result.interval} days`);
+  console.log(`[LeetRecall] Rated ${problem.title}: ${rating} → next in ${result.interval} days`);
 
   return { success: true, problem };
 }
@@ -247,6 +322,16 @@ async function handleGetProblem({ slug }) {
 async function handleDeleteProblem({ slug }) {
   await Storage.deleteProblem(slug);
   await updateBadge();
+  return { success: true };
+}
+
+async function handleUpdateProblemTags({ slug, tags }) {
+  if (!slug) return { success: false, error: 'Missing problem id' };
+  const problem = await Storage.getProblem(slug);
+  if (!problem) return { success: false, error: 'Problem not found' };
+  
+  problem.tags = normalizeTags(tags);
+  await Storage.saveProblem(slug, problem);
   return { success: true };
 }
 
@@ -287,7 +372,7 @@ async function handleAddManual(data) {
     return { success: false, error: 'Problem already tracked' };
   }
 
-  problem = createProblemRecord(data);
+  problem = createProblemRecord({ ...data, tags: normalizeTags(data.tags) });
   await Storage.saveProblem(slug, problem);
 
   const stats = await Storage.getStats();
@@ -320,11 +405,66 @@ async function handleExportData() {
 }
 
 async function handleImportData(data) {
-  if (data.problems) await Storage.setProblems(data.problems);
+  // Basic schema validation
+  if (!data || typeof data !== 'object') {
+    return { success: false, error: 'Invalid import data' };
+  }
+  if (data.version && !data.version.startsWith('1.')) {
+    return { success: false, error: `Unsupported version: ${data.version}` };
+  }
+
+  // Merge problems (latest-wins by lastSolvedAt)
+  if (data.problems && typeof data.problems === 'object') {
+    const existing = await Storage.getProblems();
+    const merged = { ...existing };
+    for (const [slug, imported] of Object.entries(data.problems)) {
+      if (!merged[slug]) {
+        merged[slug] = imported;
+      } else {
+        const existingDate = new Date(merged[slug].lastSolvedAt || 0).getTime();
+        const importedDate = new Date(imported.lastSolvedAt || 0).getTime();
+        if (importedDate > existingDate) {
+          // Keep imported record but preserve higher solveCount / history
+          merged[slug] = {
+            ...imported,
+            solveCount: Math.max(imported.solveCount || 0, merged[slug].solveCount || 0),
+            failedAttempts: Math.max(imported.failedAttempts || 0, merged[slug].failedAttempts || 0),
+            history: mergeHistory(merged[slug].history, imported.history),
+            submissions: mergeSubmissions(merged[slug].submissions, imported.submissions),
+          };
+        } else {
+          // Keep existing but merge in any new history/submissions
+          merged[slug] = {
+            ...merged[slug],
+            solveCount: Math.max(imported.solveCount || 0, merged[slug].solveCount || 0),
+            failedAttempts: Math.max(imported.failedAttempts || 0, merged[slug].failedAttempts || 0),
+            history: mergeHistory(merged[slug].history, imported.history),
+            submissions: mergeSubmissions(merged[slug].submissions, imported.submissions),
+          };
+        }
+      }
+    }
+    await Storage.setProblems(merged);
+  }
+
   if (data.settings) await Storage.saveSettings(data.settings);
   if (data.stats) await Storage.saveStats(data.stats);
   if (data.activity) {
-    await chrome.storage.local.set({ [STORAGE_KEYS.ACTIVITY]: data.activity });
+    // Merge activity logs (sum per day)
+    const existingActivity = await Storage.getActivity();
+    const mergedActivity = { ...existingActivity };
+    for (const [day, counts] of Object.entries(data.activity)) {
+      if (!mergedActivity[day]) {
+        mergedActivity[day] = counts;
+      } else {
+        mergedActivity[day] = {
+          solved: Math.max(mergedActivity[day].solved || 0, counts.solved || 0),
+          reviewed: Math.max(mergedActivity[day].reviewed || 0, counts.reviewed || 0),
+          attempted: Math.max(mergedActivity[day].attempted || 0, counts.attempted || 0),
+        };
+      }
+    }
+    await chrome.storage.local.set({ [STORAGE_KEYS.ACTIVITY]: mergedActivity });
   }
 
   await updateBadge();
@@ -376,11 +516,10 @@ async function handleGetAnalytics() {
     };
   }).sort((a, b) => b.weakScore - a.weakScore);
 
-  // ─── Accuracy & Time Over Time (last 30 days) ───
+  // ─── Accuracy Over Time (last 30 days) ───
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
   const dailyAccuracy = {};
-  const dailyTime = {};
 
   list.forEach(p => {
     (p.history || []).forEach(h => {
@@ -391,17 +530,6 @@ async function handleGetAnalytics() {
         if (h.rating >= 3) dailyAccuracy[day].good++;
       }
     });
-
-    (p.submissions || []).forEach(s => {
-      if (s.timeSpentMs > 0 && s.status === 'Accepted') {
-        const day = s.date.split('T')[0];
-        if (new Date(day) >= thirtyDaysAgo) {
-          if (!dailyTime[day]) dailyTime[day] = { totalMs: 0, count: 0 };
-          dailyTime[day].totalMs += s.timeSpentMs;
-          dailyTime[day].count++;
-        }
-      }
-    });
   });
 
   const accuracyTimeline = Object.entries(dailyAccuracy)
@@ -410,14 +538,6 @@ async function handleGetAnalytics() {
       date,
       accuracy: Math.round((data.good / data.total) * 100),
       total: data.total,
-    }));
-
-  const timeTimeline = Object.entries(dailyTime)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, data]) => ({
-      date,
-      avgTimeMs: data.totalMs / data.count,
-      count: data.count,
     }));
 
   // ─── Mastery distribution ───
@@ -434,7 +554,6 @@ async function handleGetAnalytics() {
     analytics: {
       topicStats,
       accuracyTimeline,
-      timeTimeline,
       mastery,
       totalProblems: list.length,
     },
@@ -576,8 +695,8 @@ async function updateStreak(stats) {
   if (stats.lastActiveDate === yesterdayStr) {
     // Consecutive day — increment streak
     stats.streak += 1;
-  } else if (stats.lastActiveDate !== today) {
-    // Streak broken
+  } else {
+    // Streak broken (or first ever activity)
     stats.streak = 1;
   }
 
@@ -585,10 +704,62 @@ async function updateStreak(stats) {
 }
 
 // ─── Exports for Testing ────────────────────────────────────────────────
+function normalizeTags(tags) {
+  const rawTags = Array.isArray(tags) ? tags : String(tags || '').split(/[,;\n]+/);
+  return [...new Map(rawTags
+    .map(tag => String(tag || '').trim())
+    .filter(Boolean)
+    .map(tag => [tag.toLowerCase(), tag])).values()];
+}
+
+function mergeTags(existingTags, incomingTags) {
+  return normalizeTags([...(existingTags || []), ...(incomingTags || [])]);
+}
+
+/**
+ * Merge two history arrays, deduplicating by (date + rating) pair.
+ */
+function mergeHistory(existingHistory, incomingHistory) {
+  const existing = existingHistory || [];
+  const incoming = incomingHistory || [];
+  const seen = new Set(existing.map(h => `${h.date}|${h.rating}`));
+  const merged = [...existing];
+  for (const entry of incoming) {
+    const key = `${entry.date}|${entry.rating}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(entry);
+    }
+  }
+  return merged.sort((a, b) => new Date(a.date) - new Date(b.date));
+}
+
+/**
+ * Merge two submissions arrays, deduplicating by (date + status) pair.
+ */
+function mergeSubmissions(existingSubs, incomingSubs) {
+  const existing = existingSubs || [];
+  const incoming = incomingSubs || [];
+  const seen = new Set(existing.map(s => `${s.date}|${s.status}`));
+  const merged = [...existing];
+  for (const entry of incoming) {
+    const key = `${entry.date}|${entry.status}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(entry);
+    }
+  }
+  return merged.sort((a, b) => new Date(a.date) - new Date(b.date));
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     handleProblemSubmitted,
     handleRateConfidence,
     handleMessage,
+    handleImportData,
+    normalizeTags,
+    mergeHistory,
+    mergeSubmissions,
   };
 }

@@ -116,6 +116,23 @@ button {
   font-size: inherit;
 }
 
+/* ─── Scrollbars ─────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bg-hover);
+  border-radius: var(--radius-full);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+}
+
 /* ─── Utility Classes ────────────────────────────────── */
 
 .text-accent { color: var(--text-accent); }

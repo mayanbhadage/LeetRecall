@@ -7,6 +7,8 @@ document.addEventListener('DOMContentLoaded', init);
 let currentProblem = null;
 let dueProblems = [];
 let pendingNotes = [];  // Notes being composed for the current attempt
+let pendingTags = [];   // Custom tags being added for the current attempt
+let allExistingTags = new Set(); // For autocomplete
 
 async function init() {
   await loadData();
@@ -31,7 +33,14 @@ async function loadData() {
   }
 
   if (upcomingRes.success) {
-    renderUpcoming(upcomingRes.problems);
+    const allProblems = Object.values(upcomingRes.problems);
+    renderUpcoming(allProblems);
+    
+    // Extract unique tags for autocomplete
+    allProblems.forEach(p => {
+      if (p.tags) p.tags.forEach(t => allExistingTags.add(t));
+    });
+    populateTagsDatalist();
   }
 }
 
@@ -42,7 +51,7 @@ function setupListeners() {
   document.querySelectorAll('.rating-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const rating = parseInt(btn.dataset.rating);
-      if (currentProblem) rateConfidence(currentProblem.id, rating);
+      if (currentProblem) rateConfidence(getProblemSlug(currentProblem), rating);
     });
   });
 
@@ -55,6 +64,39 @@ function setupListeners() {
     arrow.textContent = isHidden ? '▾' : '▸';
     if (isHidden) {
       document.getElementById('notes-input-field').focus();
+    }
+  });
+
+  // ─── Tags Toggle ─────────────────────────────────
+  document.getElementById('tags-toggle').addEventListener('click', () => {
+    const body = document.getElementById('tags-input-body');
+    const arrow = document.getElementById('tags-toggle-arrow');
+    const isHidden = body.style.display === 'none';
+    body.style.display = isHidden ? 'block' : 'none';
+    arrow.textContent = isHidden ? '▾' : '▸';
+    if (isHidden) {
+      document.getElementById('tags-input-field').focus();
+    }
+  });
+
+  // ─── Add Tag ─────────────────────────────────────
+  document.getElementById('btn-add-tag').addEventListener('click', addTagFromInput);
+  document.getElementById('tags-input-field').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addTagFromInput();
+    }
+  });
+  document.getElementById('tags-input-field').addEventListener('input', (e) => {
+    // Auto-add tag when user clicks a datalist autocomplete option
+    if (e.inputType === 'insertReplacementText') {
+      addTagFromInput();
+    }
+  });
+  document.getElementById('tags-input-field').addEventListener('change', (e) => {
+    // Fallback: 'change' fires on datalist selection in many browsers
+    if (e.target.value.trim() && allExistingTags.has(e.target.value.trim())) {
+      addTagFromInput();
     }
   });
 
@@ -142,7 +184,7 @@ function createEmptyState() {
 function createProblemCard(problem, isActive) {
   const card = document.createElement('div');
   card.className = `problem-card${isActive ? ' active' : ''}`;
-  card.dataset.slug = problem.id;
+  card.dataset.slug = getProblemSlug(problem);
 
   const diff = (problem.difficulty || 'unknown').toLowerCase();
   const dueText = getRelativeTime(problem.nextDueDate);
@@ -175,12 +217,17 @@ async function selectProblem(problem) {
   ratingSection.style.display = 'block';
   updateIntervalHints(problem);
 
-  // Collapse notes input
+  // Collapse inputs
   document.getElementById('notes-input-body').style.display = 'none';
   document.getElementById('notes-toggle-arrow').textContent = '▸';
+  
+  pendingTags = [];
+  renderTagsList();
+  document.getElementById('tags-input-body').style.display = 'none';
+  document.getElementById('tags-toggle-arrow').textContent = '▸';
 
   // Load previous notes for this problem
-  await loadPreviousNotes(problem.id);
+  await loadPreviousNotes(getProblemSlug(problem));
 }
 
 function updateIntervalHints(problem) {
@@ -252,14 +299,24 @@ function updateStats(stats) {
 // ─── Actions ───────────────────────────────────────────
 
 async function rateConfidence(slug, rating) {
+  // Auto-commit any pending input before saving
+  const tagInput = document.getElementById('tags-input-field');
+  if (tagInput && tagInput.value.trim()) addTagFromInput();
+  
+  const noteInput = document.getElementById('notes-input-field');
+  if (noteInput && noteInput.value.trim()) addNoteFromInput();
+
   const response = await sendMessage('RATE_CONFIDENCE', {
     slug,
     rating,
     notes: pendingNotes.length > 0 ? pendingNotes : undefined,
+    customTags: pendingTags.length > 0 ? pendingTags : undefined,
   });
   if (response.success) {
     pendingNotes = [];
+    pendingTags = [];
     renderNotesList();
+    renderTagsList();
     document.getElementById('notes-review-section').style.display = 'none';
     await loadData();
   }
@@ -302,6 +359,69 @@ function renderNotesList() {
   container.querySelectorAll('.notes-item-remove').forEach(btn => {
     btn.addEventListener('click', () => removeNote(parseInt(btn.dataset.index)));
   });
+}
+
+// ─── Tags Management ───────────────────────────────────
+
+function addTagFromInput() {
+  const input = document.getElementById('tags-input-field');
+  const tags = parseTagsInput(input.value);
+  if (tags.length === 0) return;
+
+  tags.some(tag => {
+    if (pendingTags.length >= 10) return true; // Max 10 tags per attempt
+    if (pendingTags.some(existing => existing.toLowerCase() === tag.toLowerCase())) return false;
+    pendingTags.push(tag);
+    return false;
+  });
+  input.value = '';
+  input.focus();
+  renderTagsList();
+}
+
+function removeTag(index) {
+  pendingTags.splice(index, 1);
+  renderTagsList();
+}
+
+function renderTagsList() {
+  const container = document.getElementById('tags-items-list');
+  if (pendingTags.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+
+  container.innerHTML = pendingTags.map((tag, i) => `
+    <div class="tags-item">
+      <span class="tags-item-text">${escapeHtml(tag)}</span>
+      <button class="tags-item-remove" data-index="${i}" title="Remove">×</button>
+    </div>
+  `).join('');
+
+  container.querySelectorAll('.tags-item-remove').forEach(btn => {
+    btn.addEventListener('click', () => removeTag(parseInt(btn.dataset.index)));
+  });
+}
+
+function populateTagsDatalist() {
+  const datalist = document.getElementById('existing-tags-list');
+  if (!datalist) return;
+  datalist.innerHTML = Array.from(allExistingTags)
+    .sort()
+    .map(tag => `<option value="${escapeHtml(tag)}">`)
+    .join('');
+}
+
+function getProblemSlug(problem) {
+  return problem.id || problem.slug || problem.titleSlug || '';
+}
+
+function parseTagsInput(value) {
+  return [...new Map(String(value || '')
+    .split(/[,;\n]+/)
+    .map(tag => tag.trim())
+    .filter(Boolean)
+    .map(tag => [tag.toLowerCase(), tag])).values()];
 }
 
 async function loadPreviousNotes(slug) {

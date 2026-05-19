@@ -66,29 +66,25 @@
       <button class="notes-dismiss-btn" id="btn-dismiss-notes">Dismiss</button>
     </section>
 
-    <!-- Confidence Rating -->
+    <!-- Confidence Rating & Notes/Tags -->
     <section class="section rating-section" id="rating-section" style="display: none;">
-      <h3 class="section-title">
-        Rate Your Confidence
-        <span class="title-hint" title="How easily did you recall the solution?">ⓘ</span>
-      </h3>
-      <div class="rating-buttons">
-        <button class="rating-btn rating-again" data-rating="1">
-          <span class="rating-label">Again</span>
-          <span class="rating-interval" id="interval-1"></span>
-        </button>
-        <button class="rating-btn rating-hard" data-rating="2">
-          <span class="rating-label">Hard</span>
-          <span class="rating-interval" id="interval-2"></span>
-        </button>
-        <button class="rating-btn rating-good" data-rating="3">
-          <span class="rating-label">Good</span>
-          <span class="rating-interval" id="interval-3"></span>
-        </button>
-        <button class="rating-btn rating-easy" data-rating="4">
-          <span class="rating-label">Easy</span>
-          <span class="rating-interval" id="interval-4"></span>
-        </button>
+      
+      <!-- Tags Input for Current Attempt -->
+      <div class="tags-input-section" id="tags-input-section" style="margin-top: 0; border-top: none; padding-top: 0;">
+        <div class="tags-input-header" id="tags-toggle">
+          <span class="tags-input-label">🏷️ Add Custom Tags</span>
+          <span class="tags-toggle-arrow" id="tags-toggle-arrow">▸</span>
+        </div>
+        <div class="tags-input-body" id="tags-input-body" style="display: none;">
+          <div class="tags-items-list" id="tags-items-list"></div>
+          <div class="tags-add-row">
+            <input type="text" class="tags-input-field" id="tags-input-field" 
+                   placeholder="e.g., Two Pointer, BFS" maxlength="200" list="existing-tags-list" autocomplete="off">
+            <datalist id="existing-tags-list"></datalist>
+            <button type="button" class="tags-add-btn" id="btn-add-tag" title="Add tag">+</button>
+          </div>
+          <div class="tags-hint">Separate multiple tags with commas, then press Enter or click +.</div>
+        </div>
       </div>
 
       <!-- Notes Input for Current Attempt -->
@@ -104,7 +100,32 @@
                    placeholder="e.g., Remember to check edge case..." maxlength="200">
             <button class="notes-add-btn" id="btn-add-note" title="Add note">+</button>
           </div>
-          <div class="notes-hint">Press Enter or click + to add a note. Notes are saved with your rating.</div>
+          <div class="notes-hint">Press Enter or click + to add a note.</div>
+        </div>
+      </div>
+
+      <div style="margin-top: 16px;">
+        <h3 class="section-title">
+          Rate Your Confidence
+          <span class="title-hint" title="How easily did you recall the solution?">ⓘ</span>
+        </h3>
+        <div class="rating-buttons">
+          <button class="rating-btn rating-again" data-rating="1">
+            <span class="rating-label">Again</span>
+            <span class="rating-interval" id="interval-1"></span>
+          </button>
+          <button class="rating-btn rating-hard" data-rating="2">
+            <span class="rating-label">Hard</span>
+            <span class="rating-interval" id="interval-2"></span>
+          </button>
+          <button class="rating-btn rating-good" data-rating="3">
+            <span class="rating-label">Good</span>
+            <span class="rating-interval" id="interval-3"></span>
+          </button>
+          <button class="rating-btn rating-easy" data-rating="4">
+            <span class="rating-label">Easy</span>
+            <span class="rating-interval" id="interval-4"></span>
+          </button>
         </div>
       </div>
     </section>

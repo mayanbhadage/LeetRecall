@@ -7,6 +7,7 @@ const STORAGE_KEYS = {
   SETTINGS: 'leetrecall_settings',
   STATS: 'leetrecall_stats',
   ACTIVITY: 'leetrecall_activity',  // daily activity log for heatmap
+  SYNC_META: 'leetrecall_sync_meta', // local metadata about last sync
 };
 
 const DEFAULT_SETTINGS = {
@@ -41,3 +42,16 @@ const QUALITY_MAP = {
 const ALARM_NAME = 'leetrecall_badge_refresh';
 const ALARM_INTERVAL_MINUTES = 30;
 const REMINDER_ALARM_NAME = 'leetrecall_daily_reminder';
+
+if (typeof module !== 'undefined') {
+  module.exports = {
+    STORAGE_KEYS,
+    DEFAULT_SETTINGS,
+    DEFAULT_STATS,
+    CONFIDENCE_LABELS,
+    QUALITY_MAP,
+    ALARM_NAME,
+    ALARM_INTERVAL_MINUTES,
+    REMINDER_ALARM_NAME
+  };
+}

@@ -57,6 +57,18 @@ function calculateSM2(problem, rating) {
   };
 }
 
+const NUMBERED_TITLE_RE = /^(?:[A-Za-z]+\s*)*\d+[A-Za-z]?(?:\.\d+)?\.\s+/;
+
+function formatProblemTitle(frontendId, title) {
+  const cleanTitle = String(title || '').trim();
+  const cleanFrontendId = String(frontendId || '').trim();
+
+  if (!cleanTitle || NUMBERED_TITLE_RE.test(cleanTitle)) return cleanTitle;
+  if (!cleanFrontendId) return cleanTitle;
+
+  return `${cleanFrontendId}. ${cleanTitle.replace(NUMBERED_TITLE_RE, '')}`;
+}
+
 /**
  * Create a new problem record with default SM-2 values.
  * 
@@ -70,10 +82,12 @@ function calculateSM2(problem, rating) {
  */
 function createProblemRecord(info) {
   const now = new Date().toISOString();
+  const frontendId = info.frontendId || info.questionFrontendId || info.problemNumber || '';
 
   return {
     id: info.slug,
-    title: info.title,
+    frontendId,
+    title: formatProblemTitle(frontendId, info.title),
     url: info.url,
     difficulty: info.difficulty || 'Unknown',
     tags: info.tags || [],
@@ -90,4 +104,8 @@ function createProblemRecord(info) {
     solveCount: 1,
     history: [],
   };
+}
+
+if (typeof module !== 'undefined') {
+  module.exports = { calculateSM2, createProblemRecord, formatProblemTitle };
 }

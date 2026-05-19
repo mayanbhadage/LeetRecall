@@ -12,6 +12,8 @@
 (function () {
   'use strict';
 
+  console.log('[LeetRecall] Detector script loaded on:', window.location.pathname);
+
   let lastDetectedSlug = null;
   let isLocked = false;
   const DEBOUNCE_MS = 15000;      // Block duplicate detections for 15 seconds
@@ -19,6 +21,8 @@
   let submissionInFlight = false;  // Only DOM-observe after user actually submits
   const PAGE_LOAD_GRACE_MS = 5000; // Ignore DOM mutations during initial page load
   let pageReady = false;
+  let lastProcessedSubmissionKey = sessionStorage.getItem('leetrecall_last_submission_key') || '';
+  const pendingSubmissionKeys = new Set();
 
   // Don't react to DOM until page has settled
   setTimeout(() => { pageReady = true; }, PAGE_LOAD_GRACE_MS);
@@ -185,6 +189,7 @@
       
       if (url.includes('/submit')) {
         submissionInFlight = true;
+        console.log('[LeetRecall] Network submit detected (REST /submit)');
         setTimeout(() => { submissionInFlight = false; }, 30000);
       } else if (url.includes('/graphql') && typeof options.body === 'string') {
         // Detect GraphQL submit mutation
@@ -209,6 +214,7 @@
         clone.json().then((data) => {
           // REST API format
           if (data?.status_msg && data?.state !== 'PENDING' && data?.state !== 'STARTED') {
+            console.log('[LeetRecall] REST response received:', data.status_msg, data.state);
             if (submissionInFlight) {
               submissionInFlight = false;
               processStatus(data.status_msg);
@@ -222,16 +228,20 @@
             const match = jsonStr.match(/"(?:statusDisplay|status_msg)"\s*:\s*"([^"]+)"/);
             if (match && match[1]) {
               const status = match[1];
+              console.log('[LeetRecall] GraphQL response received:', status);
               if (status !== 'Pending' && status !== 'Judging') {
                 submissionInFlight = false;
                 processStatus(status);
               }
             }
           }
-        }).catch(() => { /* ignore non-JSON */ });
+        }).catch((err) => { 
+          console.log('[LeetRecall] Error parsing response:', err.message);
+        });
       }
     } catch (e) {
       // Silently fail — don't break LeetCode
+      console.log('[LeetRecall] Error in fetch interception:', e.message);
     }
 
     return response;
@@ -259,46 +269,111 @@
     submissionInFlight = true;
     setTimeout(() => { submissionInFlight = false; }, 30000);
     
-    // Completely prevent false positives by renaming the old result element
+    // Mark the old result so a new accepted screen can still be detected later.
     const oldResult = document.querySelector('[data-e2e-locator="submission-result"]');
     if (oldResult) {
-      oldResult.removeAttribute('data-e2e-locator');
       oldResult.setAttribute('data-old-result', 'true');
     }
   }
 
   // ─── DOM Observer (BACKUP — only when submission is in flight) ─
 
-  const observer = new MutationObserver((mutations) => {
-    if (!pageReady || !submissionInFlight) return;
-
-    // Fast global check on any mutation if submission is in flight
-    const resultEl = document.querySelector('[data-e2e-locator="submission-result"]');
-    if (resultEl) {
-      const txt = resultEl.textContent.trim();
-      if (txt && !txt.includes('Pending') && !txt.includes('Judging')) {
-        submissionInFlight = false;
-        processStatus(txt);
-        return;
-      }
-    }
+  const observer = new MutationObserver(() => {
+    if (!pageReady && !submissionInFlight) return;
+    scanVisibleSubmissionResult();
   });
 
-  function processStatus(rawText) {
-    let status = rawText;
-    if (status.startsWith('Accepted')) status = 'Accepted';
-    else if (status.startsWith('Wrong Answer')) status = 'Wrong Answer';
-    else if (status.startsWith('Time Limit Exceeded')) status = 'Time Limit Exceeded';
-    else if (status.startsWith('Memory Limit Exceeded')) status = 'Memory Limit Exceeded';
-    else if (status.startsWith('Runtime Error')) status = 'Runtime Error';
-    else if (status.startsWith('Compile Error')) status = 'Compile Error';
-    
-    onSubmissionResult(status);
+  function scanVisibleSubmissionResult() {
+    const detected = detectVisibleSubmissionResult();
+    if (!detected) return;
+
+    submissionInFlight = false;
+    processStatus(detected.status, detected.signature);
+  }
+
+  function detectVisibleSubmissionResult() {
+    const resultEl = document.querySelector('[data-e2e-locator="submission-result"]');
+    const resultText = resultEl?.textContent?.trim() || '';
+
+    if (resultText && !isPendingStatus(resultText)) {
+      const status = normalizeSubmissionStatus(resultText);
+      if (status) {
+        const pageText = `${resultText}\n${document.body.innerText || ''}`;
+        return {
+          status,
+          signature: buildSubmissionSignature(status, pageText),
+        };
+      }
+    }
+
+    const bodyText = document.body.innerText || '';
+    const status = findStatusInSubmissionText(bodyText);
+    if (!status) return null;
+
+    return {
+      status,
+      signature: buildSubmissionSignature(status, bodyText),
+    };
+  }
+
+  function findStatusInSubmissionText(text) {
+    if (!text) return '';
+
+    const testcaseMatch = text.match(
+      /\b(Accepted|Wrong Answer|Time Limit Exceeded|Memory Limit Exceeded|Runtime Error|Compile Error)\b\s+\d+\s*\/\s*\d+\s*testcases\s+passed/i
+    );
+    if (testcaseMatch) return normalizeSubmissionStatus(testcaseMatch[1]);
+
+    const hasSubmissionContext =
+      /submitted at/i.test(text) ||
+      (/runtime/i.test(text) && /memory/i.test(text));
+
+    if (!hasSubmissionContext) return '';
+
+    const statusLine = text
+      .split('\n')
+      .map(line => line.trim())
+      .find(line => /^(Accepted|Wrong Answer|Time Limit Exceeded|Memory Limit Exceeded|Runtime Error|Compile Error)(\s|$)/.test(line));
+
+    return statusLine ? normalizeSubmissionStatus(statusLine) : '';
+  }
+
+  function normalizeSubmissionStatus(rawText) {
+    const text = rawText.trim();
+    if (text.includes('Accepted')) return 'Accepted';
+    if (text.includes('Wrong Answer')) return 'Wrong Answer';
+    if (text.includes('Time Limit Exceeded')) return 'Time Limit Exceeded';
+    if (text.includes('Memory Limit Exceeded')) return 'Memory Limit Exceeded';
+    if (text.includes('Runtime Error')) return 'Runtime Error';
+    if (text.includes('Compile Error')) return 'Compile Error';
+    return '';
+  }
+
+  function isPendingStatus(text) {
+    return text.includes('Pending') || text.includes('Judging') || text.includes('Started');
+  }
+
+  function buildSubmissionSignature(status, text) {
+    const submissionUrl = window.location.pathname.match(/\/submissions?\/\d+/)?.[0] || '';
+    const submittedAt = text.match(/submitted at[^\n]+/i)?.[0] || '';
+    const testcaseLine = text.match(new RegExp(`${status}\\s+\\d+\\s*\\/\\s*\\d+\\s*testcases\\s+passed`, 'i'))?.[0] || '';
+    const runtimeLine = text.match(/runtime\s*\n?\s*\d+\s*ms/i)?.[0] || '';
+
+    return [submissionUrl, submittedAt, testcaseLine, runtimeLine, status]
+      .filter(Boolean)
+      .join('|');
+  }
+
+  function processStatus(rawText, signature = '') {
+    const status = normalizeSubmissionStatus(rawText);
+    if (!status) return;
+
+    onSubmissionResult(status, signature);
   }
 
   // ─── Core Handler ─────────────────────────────────────────────
 
-  function onSubmissionResult(status) {
+  function onSubmissionResult(status, signature = '') {
     // Guard: bail if extension was reloaded and this script is stale
     if (!chrome.runtime?.id) {
       observer.disconnect();
@@ -308,8 +383,17 @@
     const slug = Extractor.getSlug();
     if (!slug) return;
 
+    const submissionKey = signature ? `${slug}:${status}:${signature}` : '';
+    if (submissionKey) {
+      if (submissionKey === lastProcessedSubmissionKey || pendingSubmissionKeys.has(submissionKey)) {
+        return;
+      }
+      pendingSubmissionKeys.add(submissionKey);
+    }
+
     // Hard lock — one celebration/toast per problem per 15 seconds
     if (isLocked && slug === lastDetectedSlug) {
+      if (submissionKey) pendingSubmissionKeys.delete(submissionKey);
       return;
     }
 
@@ -321,20 +405,39 @@
     }, DEBOUNCE_MS);
 
     // Extract problem info and send to service worker
-    const problemInfo = Extractor.extractAll();
+    let problemInfo;
+    try {
+      problemInfo = Extractor.extractAll();
+      if (!problemInfo || !problemInfo.slug) {
+        console.error('[LeetRecall] Failed to extract problem info - no slug found');
+        if (submissionKey) pendingSubmissionKeys.delete(submissionKey);
+        return;
+      }
+    } catch (e) {
+      console.error('[LeetRecall] Error extracting problem info:', e);
+      if (submissionKey) pendingSubmissionKeys.delete(submissionKey);
+      return;
+    }
+
     problemInfo.status = status;
     updateActiveTime(); // Make sure active time is totally up to date
     problemInfo.timeSpentMs = activeTimeMs;
-    console.log(`[LeetRecall] Submission result: ${status} for ${problemInfo.title}. Time spent: Math.round(${activeTimeMs} / 1000)s`);
+    console.log(`[LeetRecall] Submission result: ${status} for ${problemInfo.title}. Time spent: ${Math.round(activeTimeMs / 1000)}s`);
 
     chrome.runtime.sendMessage(
       { type: 'PROBLEM_SUBMITTED', data: problemInfo },
       (response) => {
         if (chrome.runtime.lastError) {
           console.error('[LeetRecall] Error sending message:', chrome.runtime.lastError);
+          if (submissionKey) pendingSubmissionKeys.delete(submissionKey);
           return;
         }
         if (response?.success) {
+          if (submissionKey) {
+            lastProcessedSubmissionKey = submissionKey;
+            sessionStorage.setItem('leetrecall_last_submission_key', submissionKey);
+            pendingSubmissionKeys.delete(submissionKey);
+          }
           if (status === 'Accepted') {
             showCelebration(problemInfo.title, response.isNew);
             // Clear timer so a future spaced repetition review starts fresh
@@ -344,6 +447,8 @@
           } else {
             showFailureToast(problemInfo.title, status);
           }
+        } else if (submissionKey) {
+          pendingSubmissionKeys.delete(submissionKey);
         }
       }
     );
@@ -374,13 +479,21 @@
 
     document.body.appendChild(toast);
 
+    toast.addEventListener('click', () => {
+      chrome.runtime.sendMessage({ type: 'OPEN_DASHBOARD' });
+      toast.classList.add('leetrecall-toast-hide');
+      setTimeout(() => toast.remove(), 400);
+    });
+
     requestAnimationFrame(() => {
       toast.classList.add('leetrecall-toast-show');
     });
 
     setTimeout(() => {
-      toast.classList.add('leetrecall-toast-hide');
-      setTimeout(() => toast.remove(), 400);
+      if (document.body.contains(toast)) {
+        toast.classList.add('leetrecall-toast-hide');
+        setTimeout(() => toast.remove(), 400);
+      }
     }, 4000);
   }
 
@@ -403,11 +516,20 @@
     `;
 
     document.body.appendChild(toast);
+
+    toast.addEventListener('click', () => {
+      chrome.runtime.sendMessage({ type: 'OPEN_DASHBOARD' });
+      toast.classList.add('leetrecall-toast-hide');
+      setTimeout(() => toast.remove(), 400);
+    });
+
     requestAnimationFrame(() => toast.classList.add('leetrecall-toast-show'));
 
     setTimeout(() => {
-      toast.classList.add('leetrecall-toast-hide');
-      setTimeout(() => toast.remove(), 400);
+      if (document.body.contains(toast)) {
+        toast.classList.add('leetrecall-toast-hide');
+        setTimeout(() => toast.remove(), 400);
+      }
     }, 5000);
   }
 
@@ -586,7 +708,12 @@
   // Check for review notes on initial load (with delay for page to settle)
   setTimeout(() => {
     checkForReviewNotes();
+    scanVisibleSubmissionResult();
   }, 2000);
+
+  setInterval(() => {
+    if (submissionInFlight) scanVisibleSubmissionResult();
+  }, 1500);
 
   // Also check when navigating to a new problem (SPA)
   const originalCheckNotes = checkForReviewNotes;
@@ -613,4 +740,3 @@
 
   console.log('[LeetRecall] Content script loaded — watching for submissions');
 })();
-

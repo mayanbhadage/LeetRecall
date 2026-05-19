@@ -119,8 +119,8 @@ function renderHeatmap(activity) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
     const key = d.toISOString().split('T')[0];
-    const data = activity[key] || { solved: 0, reviewed: 0 };
-    const total = data.solved + data.reviewed;
+    const data = activity[key] || { solved: 0, reviewed: 0, attempted: 0 };
+    const total = data.solved + data.reviewed + (data.attempted || 0);
     days.push({ date: key, total, day: d.getDay(), label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) });
   }
 
@@ -193,7 +193,7 @@ async function loadAnalytics() {
   const res = await sendMsg('GET_ANALYTICS');
   if (!res.success) return;
 
-  const { topicStats, accuracyTimeline, timeTimeline, mastery } = res.analytics;
+  const { topicStats, accuracyTimeline, mastery } = res.analytics;
 
   // Mastery distribution
   document.getElementById('mastery-mastered').textContent = mastery.mastered;
@@ -206,11 +206,6 @@ async function loadAnalytics() {
 
   // Accuracy timeline
   renderAccuracyChart(accuracyTimeline);
-
-  // Time timeline
-  if (timeTimeline) {
-    renderTimeChart(timeTimeline);
-  }
 }
 
 function renderWeakTopics(topicStats) {
@@ -269,40 +264,7 @@ function renderAccuracyChart(timeline) {
         const color = d.accuracy >= 80 ? 'var(--green)' : d.accuracy >= 60 ? 'var(--accent)' : d.accuracy >= 40 ? 'var(--orange)' : 'var(--red)';
         const date = new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         return `
-          <div class="accuracy-bar-wrapper" title="${date}: ${d.accuracy}% (${d.total} reviews)">
-            <div class="accuracy-bar" style="height: ${height}px; width: ${barWidth}px; background: ${color};"></div>
-            <div class="accuracy-bar-label">${date.split(' ')[1]}</div>
-          </div>
-        `;
-      }).join('')}
-    </div>
-    <div class="accuracy-scale">
-      <span>0%</span><span>50%</span><span>100%</span>
-    </div>
-  `;
-}
-
-function renderTimeChart(timeline) {
-  const container = document.getElementById('time-chart');
-  if (!container) return;
-
-  if (!timeline || timeline.length === 0) {
-    container.innerHTML = '<div class="empty-hint">No submission time data yet</div>';
-    return;
-  }
-
-  const maxTotal = Math.max(...timeline.map(d => d.avgTimeMs));
-  const barWidth = Math.max(12, Math.min(28, Math.floor(700 / timeline.length)));
-
-  container.innerHTML = `
-    <div class="accuracy-bars">
-      ${timeline.map(d => {
-        const height = maxTotal > 0 ? Math.max(4, (d.avgTimeMs / maxTotal) * 120) : 4;
-        const color = 'var(--accent)';
-        const date = new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        const timeLabel = formatDuration(d.avgTimeMs);
-        return `
-          <div class="accuracy-bar-wrapper" title="${date}: ${timeLabel} (${d.count} solved)">
+          <div class="accuracy-bar-wrapper" title="${date}: ${d.accuracy}% retention (${d.total} reviews)">
             <div class="accuracy-bar" style="height: ${height}px; width: ${barWidth}px; background: ${color};"></div>
             <div class="accuracy-bar-label">${date.split(' ')[1]}</div>
           </div>
@@ -340,7 +302,12 @@ function renderTable(problems) {
   let list = Object.values(problems);
 
   // Filter
-  if (searchVal) list = list.filter(p => p.title.toLowerCase().includes(searchVal) || (p.tags || []).some(t => t.toLowerCase().includes(searchVal)));
+  if (searchVal) {
+    list = list.filter(p => {
+      const title = getDisplayTitle(p).toLowerCase();
+      return title.includes(searchVal) || (p.tags || []).some(t => t.toLowerCase().includes(searchVal));
+    });
+  }
   if (filterDiff !== 'all') list = list.filter(p => p.difficulty === filterDiff);
   if (filterTag !== 'all') list = list.filter(p => (p.tags || []).includes(filterTag));
 
@@ -363,7 +330,7 @@ function renderTable(problems) {
       vb = b.failedAttempts || 0;
     }
 
-    if (sortField === 'title') { va = (va || '').toLowerCase(); vb = (vb || '').toLowerCase(); }
+    if (sortField === 'title') { va = getDisplayTitle(a).toLowerCase(); vb = getDisplayTitle(b).toLowerCase(); }
     if (sortField === 'difficulty') { const order = { Easy: 1, Medium: 2, Hard: 3, Unknown: 4 }; va = order[va] || 4; vb = order[vb] || 4; }
     if (typeof va === 'string' && va.includes('T')) { va = new Date(va).getTime(); vb = new Date(vb).getTime(); }
     
@@ -380,6 +347,8 @@ function renderTable(problems) {
 
   emptyEl.style.display = 'none';
   tbody.innerHTML = list.map(p => {
+    const slug = getProblemSlug(p);
+    const displayTitle = getDisplayTitle(p);
     const diffClass = `difficulty-${(p.difficulty || 'unknown').toLowerCase()}`;
     const tagsHtml = (p.tags || []).slice(0, 3).map(t =>
       `<span class="tag-pill">${escapeHtml(t)}</span>`
@@ -393,16 +362,23 @@ function renderTable(problems) {
     }
 
     return `<tr>
-      <td><a href="${p.url}" target="_blank">${escapeHtml(p.title)}</a></td>
-      <td><span class="${diffClass}">${p.difficulty}</span></td>
-      <td class="tags-cell">${tagsHtml || '<span class="text-tertiary">—</span>'}</td>
-      <td>${formatDate(p.addedAt)}</td>
-      <td>${formatDate(p.lastSolvedAt)}</td>
-      <td>${getConfidenceLabel(p.efactor)}</td>
-      <td>${formatDuration(avgTimeMs)}</td>
-      <td>${p.failedAttempts || 0}</td>
-      <td>${formatDate(p.nextDueDate)}</td>
-      <td><button class="btn-delete" data-slug="${p.id}">Delete</button></td>
+      <td data-label="Title"><a href="${p.url}" target="_blank">${escapeHtml(displayTitle)}</a></td>
+      <td data-label="Difficulty"><span class="${diffClass}">${p.difficulty}</span></td>
+      <td class="tags-cell" data-label="Tags">
+        <div class="tags-container" data-slug="${escapeHtml(slug)}" data-tags="${escapeHtml((p.tags || []).join(', '))}">
+          <div class="tags-display">
+            ${tagsHtml || '<span class="text-tertiary">—</span>'}
+            <button class="btn-edit-tags" title="Edit Tags">✏️</button>
+          </div>
+        </div>
+      </td>
+      <td data-label="Added">${formatDate(p.addedAt)}</td>
+      <td data-label="Last Solved">${formatDate(p.lastSolvedAt)}</td>
+      <td data-label="Confidence">${getConfidenceLabel(p.efactor)}</td>
+      <td data-label="Avg Time">${formatDuration(avgTimeMs)}</td>
+      <td data-label="Failures">${p.failedAttempts || 0}</td>
+      <td data-label="Next Due">${formatDate(p.nextDueDate)}</td>
+      <td data-label="Actions"><button type="button" class="btn-delete" data-slug="${escapeHtml(slug)}">Delete</button></td>
     </tr>`;
   }).join('');
 
@@ -413,6 +389,46 @@ function renderTable(problems) {
         await sendMsg('DELETE_PROBLEM', { slug: btn.dataset.slug });
         await loadDashboard();
       }
+    });
+  });
+
+  // Edit Tags handlers
+  tbody.querySelectorAll('.btn-edit-tags').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const container = btn.closest('.tags-container');
+      const slug = container.dataset.slug;
+      const currentTags = container.dataset.tags;
+      
+      container.innerHTML = `
+        <div class="tags-edit-mode">
+          <input type="text" class="tags-edit-input" value="${escapeHtml(currentTags)}" placeholder="e.g., Array, BFS" />
+          <button class="btn-save-tags" title="Save">💾</button>
+        </div>
+      `;
+      
+      const input = container.querySelector('.tags-edit-input');
+      const saveBtn = container.querySelector('.btn-save-tags');
+      input.focus();
+      input.select();
+
+      const save = async () => {
+        const newTags = parseTagsInput(input.value);
+        saveBtn.disabled = true;
+        const res = await sendMsg('UPDATE_PROBLEM_TAGS', { slug, tags: newTags });
+        if (!res.success) {
+          console.error(res);
+          saveBtn.disabled = false;
+          alert(res.error || 'Failed to save tags. Please reload the extension from chrome://extensions');
+          return;
+        }
+        await loadDashboard();
+      };
+
+      saveBtn.addEventListener('click', save);
+      input.addEventListener('keydown', (e) => { 
+        if (e.key === 'Enter') save(); 
+        if (e.key === 'Escape') loadDashboard();
+      });
     });
   });
 
@@ -537,4 +553,37 @@ function escapeHtml(str) {
   const d = document.createElement('div');
   d.textContent = str;
   return d.innerHTML;
+}
+
+const NUMBERED_TITLE_RE = /^(?:[A-Za-z]+\s*)*\d+[A-Za-z]?(?:\.\d+)?\.\s+/;
+
+function getDisplayTitle(problem) {
+  if (!problem) return '';
+  return formatProblemTitle(getProblemFrontendId(problem), problem.title || problem.id || '');
+}
+
+function getProblemFrontendId(problem) {
+  return problem.frontendId || problem.questionFrontendId || problem.questionId || problem.problemNumber || '';
+}
+
+function getProblemSlug(problem) {
+  return problem.id || problem.slug || problem.titleSlug || '';
+}
+
+function formatProblemTitle(frontendId, title) {
+  const cleanTitle = String(title || '').trim();
+  const cleanFrontendId = String(frontendId || '').trim();
+
+  if (!cleanTitle || NUMBERED_TITLE_RE.test(cleanTitle)) return cleanTitle;
+  if (!cleanFrontendId) return cleanTitle;
+
+  return `${cleanFrontendId}. ${cleanTitle.replace(NUMBERED_TITLE_RE, '')}`;
+}
+
+function parseTagsInput(value) {
+  return [...new Map(String(value || '')
+    .split(/[,;\n]+/)
+    .map(tag => tag.trim())
+    .filter(Boolean)
+    .map(tag => [tag.toLowerCase(), tag])).values()];
 }
