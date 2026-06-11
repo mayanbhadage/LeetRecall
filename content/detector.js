@@ -23,6 +23,7 @@
   let pageReady = false;
   let lastProcessedSubmissionKey = sessionStorage.getItem('leetrecall_last_submission_key') || '';
   const pendingSubmissionKeys = new Set();
+  const dismissedSubmissionKeys = new Set();
 
   // Don't react to DOM until page has settled
   setTimeout(() => { pageReady = true; }, PAGE_LOAD_GRACE_MS);
@@ -158,6 +159,7 @@
         lastDetectedSlug = null;
         submissionInFlight = false;
         pageReady = false;
+        dismissedSubmissionKeys.clear();
         setTimeout(() => { pageReady = true; }, PAGE_LOAD_GRACE_MS);
         
         // Load time tracker for new slug
@@ -217,7 +219,7 @@
             console.log('[LeetRecall] REST response received:', data.status_msg, data.state);
             if (submissionInFlight) {
               submissionInFlight = false;
-              processStatus(data.status_msg);
+              processStatus(data.status_msg, '', true);
             }
             return;
           }
@@ -231,7 +233,7 @@
               console.log('[LeetRecall] GraphQL response received:', status);
               if (status !== 'Pending' && status !== 'Judging') {
                 submissionInFlight = false;
-                processStatus(status);
+                processStatus(status, '', true);
               }
             }
           }
@@ -287,8 +289,9 @@
     const detected = detectVisibleSubmissionResult();
     if (!detected) return;
 
+    const wasUserInitiated = submissionInFlight;
     submissionInFlight = false;
-    processStatus(detected.status, detected.signature);
+    processStatus(detected.status, detected.signature, wasUserInitiated);
   }
 
   function detectVisibleSubmissionResult() {
@@ -364,16 +367,16 @@
       .join('|');
   }
 
-  function processStatus(rawText, signature = '') {
+  function processStatus(rawText, signature = '', wasUserInitiated = false) {
     const status = normalizeSubmissionStatus(rawText);
     if (!status) return;
 
-    onSubmissionResult(status, signature);
+    onSubmissionResult(status, signature, wasUserInitiated);
   }
 
   // ─── Core Handler ─────────────────────────────────────────────
 
-  function onSubmissionResult(status, signature = '') {
+  function onSubmissionResult(status, signature = '', wasUserInitiated = false) {
     // Guard: bail if extension was reloaded and this script is stale
     if (!chrome.runtime?.id) {
       observer.disconnect();
@@ -385,10 +388,45 @@
 
     const submissionKey = signature ? `${slug}:${status}:${signature}` : '';
     if (submissionKey) {
-      if (submissionKey === lastProcessedSubmissionKey || pendingSubmissionKeys.has(submissionKey)) {
+      if (dismissedSubmissionKeys.has(submissionKey)) {
         return;
       }
-      pendingSubmissionKeys.add(submissionKey);
+      if (submissionKey === lastProcessedSubmissionKey) {
+        return;
+      }
+      if (pendingSubmissionKeys.has(submissionKey) && !wasUserInitiated) {
+        return;
+      }
+    }
+
+    // For passive detection (not user-initiated), ask the user for confirmation.
+    if (!wasUserInitiated) {
+      let problemInfo;
+      try {
+        problemInfo = Extractor.extractAll();
+        if (!problemInfo || !problemInfo.slug) {
+          console.error('[LeetRecall] Failed to extract problem info - no slug found');
+          return;
+        }
+      } catch (e) {
+        console.error('[LeetRecall] Error extracting problem info:', e);
+        return;
+      }
+
+      showConfirmationToast(problemInfo.title, status, () => {
+        // User clicked Track: confirm user-initiated tracking
+        onSubmissionResult(status, signature, true);
+      }, () => {
+        // User clicked Dismiss
+        if (submissionKey) {
+          dismissedSubmissionKeys.add(submissionKey);
+        }
+      });
+
+      if (submissionKey) {
+        pendingSubmissionKeys.add(submissionKey);
+      }
+      return;
     }
 
     // Hard lock — one celebration/toast per problem per 15 seconds
@@ -452,6 +490,62 @@
         }
       }
     );
+  }
+
+  function showConfirmationToast(title, status, onConfirm, onDismiss) {
+    const existing = document.querySelector('.leetrecall-toast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.className = 'leetrecall-toast';
+    toast.style.cursor = 'default';
+
+    toast.innerHTML = `
+      <div class="leetrecall-toast-icon">❓</div>
+      <div class="leetrecall-toast-content">
+        <div class="leetrecall-toast-title">Track Old Submission?</div>
+        <div class="leetrecall-toast-message">Detected ${status} submission for ${title}</div>
+        <div class="leetrecall-toast-actions">
+          <button type="button" class="leetrecall-toast-btn leetrecall-toast-btn-confirm">Track This</button>
+          <button type="button" class="leetrecall-toast-btn leetrecall-toast-btn-dismiss">Dismiss</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(toast);
+
+    let resolved = false;
+
+    const handleConfirm = (e) => {
+      if (e) e.stopPropagation();
+      if (resolved) return;
+      resolved = true;
+      onConfirm();
+      toast.classList.add('leetrecall-toast-hide');
+      setTimeout(() => toast.remove(), 400);
+    };
+
+    const handleDismiss = (e) => {
+      if (e) e.stopPropagation();
+      if (resolved) return;
+      resolved = true;
+      onDismiss();
+      toast.classList.add('leetrecall-toast-hide');
+      setTimeout(() => toast.remove(), 400);
+    };
+
+    toast.querySelector('.leetrecall-toast-btn-confirm').addEventListener('click', handleConfirm);
+    toast.querySelector('.leetrecall-toast-btn-dismiss').addEventListener('click', handleDismiss);
+
+    requestAnimationFrame(() => {
+      toast.classList.add('leetrecall-toast-show');
+    });
+
+    setTimeout(() => {
+      if (document.body.contains(toast) && !resolved) {
+        handleDismiss();
+      }
+    }, 15000);
   }
 
   // ─── Celebration Animation ─────────────────────────────────────

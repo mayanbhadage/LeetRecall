@@ -11,6 +11,7 @@ let sortDir = 'asc';
 async function init() {
   setupTabs();
   setupSettings();
+  setupAddProblemModal();
   await loadDashboard();
 }
 
@@ -482,6 +483,14 @@ function setupSettings() {
     document.getElementById('import-file').click();
   });
 
+  document.getElementById('btn-import-problems').addEventListener('click', () => {
+    document.getElementById('import-file').click();
+  });
+
+  document.getElementById('btn-export-problems').addEventListener('click', () => {
+    document.getElementById('btn-export').click();
+  });
+
   document.getElementById('import-file').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -586,4 +595,96 @@ function parseTagsInput(value) {
     .map(tag => tag.trim())
     .filter(Boolean)
     .map(tag => [tag.toLowerCase(), tag])).values()];
+}
+
+// ─── Add Problem Modal Logic ───────────────────────────
+
+function setupAddProblemModal() {
+  const modal = document.getElementById('modal-add-problem');
+  const btnOpen = document.getElementById('btn-add-problem-open');
+  const btnClose = document.getElementById('btn-modal-close');
+  const btnCancel = document.getElementById('btn-modal-cancel');
+  const form = document.getElementById('form-add-problem');
+
+  const inputUrl = document.getElementById('input-problem-url');
+  const inputTitle = document.getElementById('input-problem-title');
+  const selectDiff = document.getElementById('select-problem-difficulty');
+  const inputTags = document.getElementById('input-problem-tags');
+
+  const openModal = () => {
+    form.reset();
+    modal.style.display = 'flex';
+    inputUrl.focus();
+  };
+
+  const closeModal = () => {
+    modal.style.display = 'none';
+  };
+
+  btnOpen.addEventListener('click', openModal);
+  btnClose.addEventListener('click', closeModal);
+  btnCancel.addEventListener('click', closeModal);
+  modal.querySelector('.modal-overlay').addEventListener('click', closeModal);
+
+  // Auto-fill Title and Difficulty from URL / Slug
+  inputUrl.addEventListener('input', () => {
+    const val = inputUrl.value;
+    const slug = extractSlugFromUrl(val);
+    if (slug) {
+      if (!inputTitle.value) {
+        inputTitle.value = slugToTitle(slug);
+      }
+    }
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const urlOrSlug = inputUrl.value.trim();
+    const slug = extractSlugFromUrl(urlOrSlug);
+    if (!slug) {
+      alert('Please enter a valid LeetCode URL or alphanumeric slug.');
+      return;
+    }
+
+    const title = inputTitle.value.trim();
+    const difficulty = selectDiff.value;
+    const tags = parseTagsInput(inputTags.value);
+
+    const url = urlOrSlug.includes('leetcode.com') ? urlOrSlug : `https://leetcode.com/problems/${slug}/`;
+
+    const res = await sendMsg('ADD_PROBLEM_MANUAL', {
+      slug,
+      title,
+      url,
+      difficulty,
+      tags
+    });
+
+    if (res.success) {
+      closeModal();
+      await loadDashboard();
+    } else {
+      alert(res.error || 'Failed to add problem.');
+    }
+  });
+}
+
+function extractSlugFromUrl(val) {
+  if (!val) return '';
+  let clean = val.trim();
+  if (clean.includes('leetcode.com/problems/')) {
+    const match = clean.match(/\/problems\/([a-zA-Z0-9-]+)/);
+    if (match && match[1]) {
+      return match[1];
+    }
+  }
+  if (/^[a-zA-Z0-9-]+$/.test(clean)) {
+    return clean;
+  }
+  return '';
+}
+
+function slugToTitle(slug) {
+  return slug.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 }

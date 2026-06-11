@@ -310,3 +310,42 @@
   letter-spacing: 0.02em;
 }
 
+/* ─── Confirmation Toast Styles ───────────────────────── */
+
+.leetrecall-toast-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.leetrecall-toast-btn {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 150ms;
+  border: none;
+  font-family: inherit;
+}
+
+.leetrecall-toast-btn-confirm {
+  background: #f59e0b;
+  color: #0b0e14;
+}
+
+.leetrecall-toast-btn-confirm:hover {
+  background: #fbbf24;
+}
+
+.leetrecall-toast-btn-dismiss {
+  background: rgba(255, 255, 255, 0.08);
+  color: #8490a5;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.leetrecall-toast-btn-dismiss:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #e8edf5;
+}
+
