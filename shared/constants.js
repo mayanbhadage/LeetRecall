@@ -12,6 +12,7 @@ const STORAGE_KEYS = {
 
 const DEFAULT_SETTINGS = {
   dailyGoal: 5,
+  dailyReviewLimit: 3,
   notificationsEnabled: true,
   reminderTime: '09:00',     // when to send daily reminder
   theme: 'dark',

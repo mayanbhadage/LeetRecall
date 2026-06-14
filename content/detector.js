@@ -28,11 +28,30 @@
   // Don't react to DOM until page has settled
   setTimeout(() => { pageReady = true; }, PAGE_LOAD_GRACE_MS);
 
+  // ─── Orphaned Script Detection ─────────────────────────────────
+  let isOrphaned = false;
+  function checkOrphaned() {
+    if (isOrphaned) return true;
+    if (!chrome.runtime?.id) {
+      isOrphaned = true;
+      return true;
+    }
+    try {
+      // Throws synchronously if context is invalidated
+      chrome.runtime.getManifest();
+    } catch (e) {
+      isOrphaned = true;
+      return true;
+    }
+    return false;
+  }
+
   // ─── Active Time Tracking ─────────────────────────────────────
   
   let activeTimeMs = 0;
   let lastActiveTimestamp = Date.now();
   let isTrackingActive = true;
+  let isManuallyPaused = false;
   let timerWidget = null;
   let timerText = null;
 
@@ -44,12 +63,44 @@
     timerWidget.className = 'leetrecall-timer-widget';
     
     timerWidget.innerHTML = `
+      <div class="leetrecall-timer-drag-handle" title="Drag to move">⋮⋮</div>
       <div class="leetrecall-timer-icon">⏱️</div>
       <div class="leetrecall-timer-text">00:00</div>
+      <div class="leetrecall-timer-controls">
+        <button class="leetrecall-timer-btn leetrecall-timer-playpause" title="Pause">⏸</button>
+        <button class="leetrecall-timer-btn leetrecall-timer-reset" title="Reset">↺</button>
+      </div>
     `;
     
     timerText = timerWidget.querySelector('.leetrecall-timer-text');
     document.body.appendChild(timerWidget);
+
+    const handle = timerWidget.querySelector('.leetrecall-timer-drag-handle');
+    makeDraggable(timerWidget, handle);
+
+    const playPauseBtn = timerWidget.querySelector('.leetrecall-timer-playpause');
+    const resetBtn = timerWidget.querySelector('.leetrecall-timer-reset');
+
+    if (!isTrackingActive) {
+      playPauseBtn.textContent = '▶';
+      playPauseBtn.title = 'Play';
+    }
+
+    playPauseBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (isTrackingActive) {
+        isManuallyPaused = true;
+        pauseTracking();
+      } else {
+        isManuallyPaused = false;
+        resumeTracking();
+      }
+    });
+
+    resetBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      clearTimeTracker(currentSlug);
+    });
   }
 
   function formatTimerDisplay(ms) {
@@ -65,34 +116,51 @@
   }
 
   function loadTimeTracker(slug) {
-    chrome.storage.local.get(['leetrecall_time'], (result) => {
-      const times = result.leetrecall_time || {};
-      activeTimeMs = times[slug] || 0;
-      lastActiveTimestamp = Date.now();
-      
-      initTimerWidget();
-      updateTimerUI();
-      if (!isTrackingActive && timerWidget) timerWidget.classList.add('paused');
-    });
+    if (checkOrphaned()) return;
+    try {
+      chrome.storage.local.get(['leetrecall_time'], (result) => {
+        if (chrome.runtime.lastError || !result) return;
+        const times = result.leetrecall_time || {};
+        activeTimeMs = times[slug] || 0;
+        lastActiveTimestamp = Date.now();
+        
+        initTimerWidget();
+        updateTimerUI();
+        if (!isTrackingActive && timerWidget) timerWidget.classList.add('paused');
+      });
+    } catch (e) {
+      // Ignore
+    }
   }
 
   function saveTimeTracker(slug) {
-    if (!slug) return;
-    chrome.storage.local.get(['leetrecall_time'], (result) => {
-      const times = result.leetrecall_time || {};
-      times[slug] = activeTimeMs;
-      chrome.storage.local.set({ leetrecall_time: times });
-    });
+    if (!slug || checkOrphaned()) return;
+    try {
+      chrome.storage.local.get(['leetrecall_time'], (result) => {
+        if (chrome.runtime.lastError || !result) return;
+        const times = result.leetrecall_time || {};
+        times[slug] = activeTimeMs;
+        chrome.storage.local.set({ leetrecall_time: times });
+      });
+    } catch (e) {
+      // Ignore
+    }
   }
 
   function clearTimeTracker(slug) {
-    chrome.storage.local.get(['leetrecall_time'], (result) => {
-      const times = result.leetrecall_time || {};
-      delete times[slug];
-      chrome.storage.local.set({ leetrecall_time: times });
-    });
-    activeTimeMs = 0;
-    updateTimerUI();
+    if (checkOrphaned()) return;
+    try {
+      chrome.storage.local.get(['leetrecall_time'], (result) => {
+        if (chrome.runtime.lastError || !result) return;
+        const times = result.leetrecall_time || {};
+        delete times[slug];
+        chrome.storage.local.set({ leetrecall_time: times });
+      });
+      activeTimeMs = 0;
+      updateTimerUI();
+    } catch (e) {
+      // Ignore
+    }
   }
 
   function updateActiveTime() {
@@ -108,14 +176,22 @@
     updateActiveTime();
     isTrackingActive = false;
     saveTimeTracker(currentSlug);
-    if (timerWidget) timerWidget.classList.add('paused');
+    if (timerWidget) {
+      timerWidget.classList.add('paused');
+      const btn = timerWidget.querySelector('.leetrecall-timer-playpause');
+      if (btn) { btn.textContent = '▶'; btn.title = 'Play'; }
+    }
   }
 
   function resumeTracking() {
-    if (isTrackingActive) return;
+    if (isManuallyPaused || isTrackingActive) return;
     lastActiveTimestamp = Date.now();
     isTrackingActive = true;
-    if (timerWidget) timerWidget.classList.remove('paused');
+    if (timerWidget) {
+      timerWidget.classList.remove('paused');
+      const btn = timerWidget.querySelector('.leetrecall-timer-playpause');
+      if (btn) { btn.textContent = '⏸'; btn.title = 'Pause'; }
+    }
   }
 
   document.addEventListener('visibilitychange', () => {
@@ -127,7 +203,11 @@
   window.addEventListener('focus', resumeTracking);
 
   let tickCount = 0;
-  setInterval(() => {
+  let timerInterval = setInterval(() => {
+    if (checkOrphaned()) {
+      clearInterval(timerInterval);
+      return;
+    }
     if (isTrackingActive) {
       updateActiveTime();
       tickCount++;
@@ -147,6 +227,10 @@
 
   let lastUrl = window.location.href;
   const urlObserver = new MutationObserver(() => {
+    if (checkOrphaned()) {
+      urlObserver.disconnect();
+      return;
+    }
     if (window.location.href !== lastUrl) {
       lastUrl = window.location.href;
       const newSlug = getCurrentSlug();
@@ -164,6 +248,7 @@
         
         // Load time tracker for new slug
         activeTimeMs = 0;
+        isManuallyPaused = false;
         loadTimeTracker(newSlug);
         resumeTracking();
         
@@ -280,7 +365,11 @@
 
   // ─── DOM Observer (BACKUP — only when submission is in flight) ─
 
-  const observer = new MutationObserver(() => {
+  const observer = new MutationObserver((mutations) => {
+    if (checkOrphaned()) {
+      observer.disconnect();
+      return;
+    }
     if (!pageReady && !submissionInFlight) return;
     scanVisibleSubmissionResult();
   });
@@ -296,7 +385,12 @@
 
   function detectVisibleSubmissionResult() {
     const resultEl = document.querySelector('[data-e2e-locator="submission-result"]');
-    const resultText = resultEl?.textContent?.trim() || '';
+    let resultText = '';
+    
+    // Only process if the element is actually visible on the screen
+    if (resultEl && resultEl.offsetParent !== null) {
+      resultText = resultEl.innerText?.trim() || '';
+    }
 
     if (resultText && !isPendingStatus(resultText)) {
       const status = normalizeSubmissionStatus(resultText);
@@ -401,26 +495,42 @@
 
     // For passive detection (not user-initiated), ask the user for confirmation.
     if (!wasUserInitiated) {
+      // Lock immediately so the observer doesn't spawn more toasts
+      if (isLocked && slug === lastDetectedSlug) {
+        return;
+      }
+      isLocked = true;
+      lastDetectedSlug = slug;
+
       let problemInfo;
       try {
         problemInfo = Extractor.extractAll();
         if (!problemInfo || !problemInfo.slug) {
           console.error('[LeetRecall] Failed to extract problem info - no slug found');
+          isLocked = false;
           return;
         }
       } catch (e) {
         console.error('[LeetRecall] Error extracting problem info:', e);
+        isLocked = false;
         return;
       }
 
       showConfirmationToast(problemInfo.title, status, () => {
         // User clicked Track: confirm user-initiated tracking
+        // Temporarily unlock so the user-initiated path can proceed
+        isLocked = false;
         onSubmissionResult(status, signature, true);
       }, () => {
         // User clicked Dismiss
         if (submissionKey) {
           dismissedSubmissionKeys.add(submissionKey);
         }
+        // Keep locked for the debounce period to prevent re-detection
+        setTimeout(() => {
+          isLocked = false;
+          lastDetectedSlug = null;
+        }, DEBOUNCE_MS);
       });
 
       if (submissionKey) {
@@ -560,7 +670,6 @@
     // Create confetti burst
     createConfetti();
 
-    // Create toast notification
     const toast = document.createElement('div');
     toast.className = 'leetrecall-toast';
     toast.innerHTML = `
@@ -568,6 +677,15 @@
       <div class="leetrecall-toast-content">
         <div class="leetrecall-toast-title">LeetRecall${isNew ? ' ✨' : ''}</div>
         <div class="leetrecall-toast-message">${isNew ? 'Tracked' : 'Updated'}: ${title}</div>
+        <div style="margin-top: 12px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">
+          <div style="font-size: 11px; color: #8490a5; margin-bottom: 8px;">Rate your confidence:</div>
+          <div class="leetrecall-toast-actions" style="display: flex; gap: 6px;">
+            <button type="button" class="leetrecall-toast-btn rating-btn" data-rating="1" style="background: rgba(239, 68, 68, 0.2) !important; color: #fca5a5 !important; border: 1px solid rgba(239, 68, 68, 0.3) !important; flex: 1; padding: 6px 4px !important;">Again</button>
+            <button type="button" class="leetrecall-toast-btn rating-btn" data-rating="2" style="background: rgba(245, 158, 11, 0.2) !important; color: #fcd34d !important; border: 1px solid rgba(245, 158, 11, 0.3) !important; flex: 1; padding: 6px 4px !important;">Hard</button>
+            <button type="button" class="leetrecall-toast-btn rating-btn" data-rating="3" style="background: rgba(16, 185, 129, 0.2) !important; color: #6ee7b7 !important; border: 1px solid rgba(16, 185, 129, 0.3) !important; flex: 1; padding: 6px 4px !important;">Good</button>
+            <button type="button" class="leetrecall-toast-btn rating-btn" data-rating="4" style="background: rgba(59, 130, 246, 0.2) !important; color: #93c5fd !important; border: 1px solid rgba(59, 130, 246, 0.3) !important; flex: 1; padding: 6px 4px !important;">Easy</button>
+          </div>
+        </div>
       </div>
     `;
 
@@ -579,16 +697,26 @@
       setTimeout(() => toast.remove(), 400);
     });
 
+    toast.querySelectorAll('.rating-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const rating = parseInt(btn.dataset.rating);
+        chrome.runtime.sendMessage({ type: 'RATE_CONFIDENCE', data: { slug: currentSlug, rating } });
+        
+        btn.style.background = 'var(--accent) !important';
+        btn.style.color = 'var(--bg-card) !important';
+        btn.textContent = 'Saved!';
+        
+        setTimeout(() => {
+          toast.classList.add('leetrecall-toast-hide');
+          setTimeout(() => toast.remove(), 400);
+        }, 800);
+      });
+    });
+
     requestAnimationFrame(() => {
       toast.classList.add('leetrecall-toast-show');
     });
-
-    setTimeout(() => {
-      if (document.body.contains(toast)) {
-        toast.classList.add('leetrecall-toast-hide');
-        setTimeout(() => toast.remove(), 400);
-      }
-    }, 4000);
   }
 
   function showFailureToast(title, status) {
@@ -799,10 +927,65 @@
     return d.innerHTML;
   }
 
+  function checkForAutoReset() {
+    if (checkOrphaned()) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('lr_reset') === 'true') {
+      console.log('[LeetRecall] Auto-reset triggered by URL parameter');
+      
+      const attemptReset = (retries = 15) => {
+        if (retries <= 0) return;
+        
+        let resetBtn = document.querySelector('[data-e2e-locator="reset-to-default-button"]');
+        if (!resetBtn) {
+          const elements = Array.from(document.querySelectorAll('button, div[role="button"]'));
+          resetBtn = elements.find(b => {
+            const label = (b.getAttribute('aria-label') || b.title || '').toLowerCase();
+            if (label.includes('reset')) return true;
+            
+            const html = b.innerHTML.toLowerCase();
+            return b.querySelector('svg') && (html.includes('rotate-left') || html.includes('arrow-rotate') || html.includes('undo'));
+          });
+        }
+        
+        if (resetBtn) {
+          console.log('[LeetRecall] Found reset button, clicking...');
+          resetBtn.click();
+          
+          let confirmRetries = 10;
+          const attemptConfirm = () => {
+            if (confirmRetries <= 0) return;
+            const confirmBtn = Array.from(document.querySelectorAll('button, div[role="button"]')).find(b => {
+              const text = (b.textContent || '').trim().toLowerCase();
+              return text === 'confirm' || text === 'yes' || text === 'reset';
+            });
+            
+            if (confirmBtn) {
+              console.log('[LeetRecall] Found confirm button, clicking...');
+              confirmBtn.click();
+              
+              const newUrl = window.location.href.replace(/[?&]lr_reset=true/, '');
+              window.history.replaceState({}, document.title, newUrl);
+            } else {
+              confirmRetries--;
+              setTimeout(attemptConfirm, 500);
+            }
+          };
+          setTimeout(attemptConfirm, 500);
+        } else {
+          setTimeout(() => attemptReset(retries - 1), 1000);
+        }
+      };
+      
+      attemptReset();
+    }
+  }
+
   // Check for review notes on initial load (with delay for page to settle)
   setTimeout(() => {
     checkForReviewNotes();
     scanVisibleSubmissionResult();
+    checkForAutoReset();
   }, 2000);
 
   setInterval(() => {

@@ -102,16 +102,37 @@ const Storage = {
 
   /**
    * Get problems due today (nextDueDate <= end of today).
+   * Respects dailyReviewLimit and prioritizes the oldest ignored problems.
    * @returns {Promise<object[]>}
    */
   async getDueProblems() {
     const problems = await this.getProblems();
+    const settings = await this.getSettings();
+    const limit = settings.dailyReviewLimit || 3;
     const now = new Date();
     const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+    const todayStr = now.toISOString().split('T')[0];
 
-    return Object.values(problems)
-      .filter(p => new Date(p.nextDueDate) <= endOfDay)
-      .sort((a, b) => new Date(a.nextDueDate) - new Date(b.nextDueDate));
+    const reviewedTodayCount = Object.values(problems).filter(p => {
+      if (!p.history) return false;
+      const reviewedToday = p.history.some(h => h.date.startsWith(todayStr));
+      const wasOldProblem = p.history.some(h => !h.date.startsWith(todayStr));
+      return reviewedToday && wasOldProblem;
+    }).length;
+
+    let due = Object.values(problems).filter(p => new Date(p.nextDueDate) <= endOfDay);
+    
+    // Sort by lastSolvedAt (oldest first) to ensure fair rotation of overdue problems
+    due.sort((a, b) => new Date(a.lastSolvedAt || 0) - new Date(b.lastSolvedAt || 0));
+
+    // Cap at the REMAINING daily limit
+    const remainingLimit = Math.max(0, limit - reviewedTodayCount);
+    if (due.length > remainingLimit) {
+      due = due.slice(0, remainingLimit);
+    }
+
+    // Sort final list by nextDueDate for consistent UI display
+    return due.sort((a, b) => new Date(a.nextDueDate) - new Date(b.nextDueDate));
   },
 
   /**

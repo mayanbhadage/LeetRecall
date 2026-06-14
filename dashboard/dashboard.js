@@ -47,7 +47,7 @@ async function loadDashboard() {
     allProblems = problemsRes.problems;
     renderStats(allProblems, statsRes?.stats);
     renderDifficultyBars(allProblems);
-    renderProgress(allProblems, statsRes?.stats);
+    renderProgress(allProblems, statsRes?.stats, settingsRes?.settings);
     renderTable(allProblems);
     populateTagFilter(allProblems);
   }
@@ -65,12 +65,9 @@ async function loadDashboard() {
 
 function renderStats(problems, stats) {
   const list = Object.values(problems);
-  const now = new Date();
-  const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-  const due = list.filter(p => new Date(p.nextDueDate) <= endOfDay);
 
   document.getElementById('stat-total').textContent = list.length;
-  document.getElementById('stat-due').textContent = due.length;
+  document.getElementById('stat-due').textContent = stats?.dueToday || 0;
   document.getElementById('stat-streak').textContent = stats?.streak || 0;
   document.getElementById('stat-reviews').textContent = stats?.totalReviews || 0;
 }
@@ -89,21 +86,27 @@ function renderDifficultyBars(problems) {
   });
 }
 
-function renderProgress(problems, stats) {
+function renderProgress(problems, stats, settings) {
   const list = Object.values(problems);
-  const now = new Date();
-  const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-  const today = now.toISOString().split('T')[0];
-  const due = list.filter(p => new Date(p.nextDueDate) <= endOfDay);
-  const reviewed = due.filter(p => p.history?.some(h => h.date.startsWith(today)));
-
-  const total = due.length;
-  const pct = total > 0 ? Math.round((reviewed.length / total) * 100) : (list.length > 0 ? 100 : 0);
+  const today = new Date().toISOString().split('T')[0];
+  
+  // Count how many problems have a history entry for today (reviewed today)
+  const reviewedToday = list.filter(p => p.history && p.history.some(h => h.date.startsWith(today))).length;
+  const dueRemaining = stats?.dueToday || 0;
+  
+  const reviewGoal = (settings && settings.dailyReviewLimit) || 3;
+  
+  const pct = Math.min(100, Math.round((reviewedToday / reviewGoal) * 100));
 
   document.getElementById('dash-progress').style.width = `${pct}%`;
-  document.getElementById('dash-progress-text').textContent =
-    total > 0 ? `${reviewed.length} of ${total} reviews done (${pct}%)` :
-    list.length > 0 ? 'All reviews complete! 🎉' : 'No reviews due';
+  
+  if (reviewedToday >= reviewGoal) {
+    document.getElementById('dash-progress-text').textContent = 'Review Goal Met! 🎉';
+  } else if (reviewedToday === 0 && dueRemaining === 0) {
+    document.getElementById('dash-progress-text').textContent = 'No reviews due';
+  } else {
+    document.getElementById('dash-progress-text').textContent = `${reviewedToday} of ${reviewGoal} reviews done (${pct}%)`;
+  }
 }
 
 // ─── Activity Heatmap ──────────────────────────────────
@@ -362,8 +365,15 @@ function renderTable(problems) {
       if (times.length > 0) avgTimeMs = times.reduce((a, b) => a + b, 0) / times.length;
     }
 
+    let finalUrl = p.url || `https://leetcode.com/problems/${slug}/`;
+    const now = new Date();
+    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+    if (new Date(p.nextDueDate) <= endOfDay) {
+      finalUrl = finalUrl.includes('?') ? `${finalUrl}&lr_reset=true` : `${finalUrl}?lr_reset=true`;
+    }
+
     return `<tr>
-      <td data-label="Title"><a href="${p.url}" target="_blank">${escapeHtml(displayTitle)}</a></td>
+      <td data-label="Title"><a href="${finalUrl}" target="_blank">${escapeHtml(displayTitle)}</a></td>
       <td data-label="Difficulty"><span class="${diffClass}">${p.difficulty}</span></td>
       <td class="tags-cell" data-label="Tags">
         <div class="tags-container" data-slug="${escapeHtml(slug)}" data-tags="${escapeHtml((p.tags || []).join(', '))}">
@@ -458,6 +468,10 @@ function setupSettings() {
     await sendMsg('SAVE_SETTINGS', { dailyGoal: parseInt(e.target.value) || 5 });
   });
 
+  document.getElementById('setting-daily-review-limit').addEventListener('change', async (e) => {
+    await sendMsg('SAVE_SETTINGS', { dailyReviewLimit: parseInt(e.target.value) || 3 });
+  });
+
   document.getElementById('setting-notifications').addEventListener('change', async (e) => {
     await sendMsg('SAVE_SETTINGS', { notificationsEnabled: e.target.checked });
   });
@@ -518,6 +532,7 @@ function setupSettings() {
 
 function loadSettingsUI(settings) {
   document.getElementById('setting-daily-goal').value = settings.dailyGoal || 5;
+  document.getElementById('setting-daily-review-limit').value = settings.dailyReviewLimit || 3;
   document.getElementById('setting-notifications').checked = settings.notificationsEnabled !== false;
   document.getElementById('setting-reminder-time').value = settings.reminderTime || '09:00';
 }

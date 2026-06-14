@@ -284,8 +284,56 @@
   border-radius: 20px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  transition: all 0.3s ease;
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
   user-select: none;
+}
+
+.leetrecall-timer-drag-handle {
+  cursor: grab;
+  color: #5a6478;
+  padding: 0 2px 0 0;
+  font-size: 14px;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 150ms;
+}
+
+.leetrecall-timer-drag-handle:hover {
+  color: #8490a5;
+}
+
+.leetrecall-timer-drag-handle:active {
+  cursor: grabbing;
+}
+
+.leetrecall-timer-controls {
+  display: flex;
+  gap: 4px;
+  margin-left: 4px;
+  padding-left: 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.leetrecall-timer-btn {
+  background: transparent;
+  border: none;
+  color: #8490a5;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 150ms;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.leetrecall-timer-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #e8edf5;
 }
 
 .leetrecall-timer-widget.paused {
@@ -315,37 +363,42 @@
 .leetrecall-toast-actions {
   display: flex;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 12px;
 }
 
 .leetrecall-toast-btn {
-  padding: 6px 12px;
+  padding: 8px 16px;
   border-radius: 6px;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 700;
   cursor: pointer;
   transition: all 150ms;
   border: none;
   font-family: inherit;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .leetrecall-toast-btn-confirm {
-  background: #f59e0b;
-  color: #0b0e14;
+  background: #f59e0b !important;
+  color: #0b0e14 !important;
 }
 
 .leetrecall-toast-btn-confirm:hover {
-  background: #fbbf24;
+  background: #fbbf24 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
 }
 
 .leetrecall-toast-btn-dismiss {
-  background: rgba(255, 255, 255, 0.08);
-  color: #8490a5;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #8490a5 !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
 }
 
 .leetrecall-toast-btn-dismiss:hover {
-  background: rgba(255, 255, 255, 0.15);
-  color: #e8edf5;
+  background: rgba(255, 255, 255, 0.15) !important;
+  color: #e8edf5 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.25);
 }
 

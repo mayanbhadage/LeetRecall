@@ -119,7 +119,7 @@ describe('Service Worker - Message Handlers', () => {
     
     // We mock calculateSM2 because the real sm2.js is mocked out
     global.calculateSM2 = jest.fn().mockReturnValue({
-      repetition: 1, interval: 1, efactor: 2.6
+      repetition: 1, interval: 1, efactor: 2.6, nextDueDate: new Date().toISOString()
     });
     
     const res = await handleMessage({ 

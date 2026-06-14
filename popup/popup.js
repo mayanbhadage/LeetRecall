@@ -11,29 +11,37 @@ let pendingTags = [];   // Custom tags being added for the current attempt
 let allExistingTags = new Set(); // For autocomplete
 
 async function init() {
-  await loadData();
   setupListeners();
+  try {
+    await loadData();
+  } catch (e) {
+    console.error('[LeetRecall] Error loading popup data:', e);
+  }
 }
 
 async function loadData() {
-  const [dueRes, statsRes, upcomingRes] = await Promise.all([
+  const [dueRes, statsRes, allProblemsRes, settingsRes] = await Promise.all([
     sendMessage('GET_DUE_PROBLEMS'),
     sendMessage('GET_STATS'),
     sendMessage('GET_ALL_PROBLEMS'),
+    sendMessage('GET_SETTINGS'),
   ]);
 
-  if (dueRes.success) {
+  // The all-problems map keyed by slug
+  const allProblemsMap = allProblemsRes.success ? allProblemsRes.problems : {};
+
+  if (dueRes.success && allProblemsRes.success && settingsRes.success) {
     dueProblems = dueRes.problems;
-    await renderQueue(dueProblems);
-    updateProgress(dueRes.problems, statsRes?.stats);
+    await renderQueue(dueProblems, allProblemsMap);
+    updateProgress(dueProblems, allProblemsMap, settingsRes.settings, statsRes?.stats);
   }
 
   if (statsRes.success) {
     updateStats(statsRes.stats);
   }
 
-  if (upcomingRes.success) {
-    const allProblems = Object.values(upcomingRes.problems);
+  if (allProblemsRes.success) {
+    const allProblems = Object.values(allProblemsMap);
     renderUpcoming(allProblems);
     
     // Extract unique tags for autocomplete
@@ -47,6 +55,13 @@ async function loadData() {
 function setupListeners() {
   document.getElementById('btn-dashboard').addEventListener('click', openDashboard);
   document.getElementById('btn-dashboard-full').addEventListener('click', openDashboard);
+
+  // ─── Practice Now (delegated, since button is dynamic) ──
+  document.getElementById('queue-container').addEventListener('click', (e) => {
+    if (e.target.closest('#btn-practice-now')) {
+      handlePracticeNow();
+    }
+  });
 
   document.querySelectorAll('.rating-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -119,22 +134,52 @@ function openDashboard() {
   chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html') });
 }
 
+async function handlePracticeNow() {
+  const btn = document.getElementById('btn-practice-now');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="practice-icon">⏳</span> Loading...';
+  }
+
+  const res = await sendMessage('GET_PRACTICE_PROBLEMS');
+  if (res.success && res.problems.length > 0) {
+    // Mark these as practice problems so the UI can label them
+    const practiceProblems = res.problems.map(p => ({ ...p, _isPractice: true }));
+    
+    const container = document.getElementById('queue-container');
+    container.innerHTML = '';
+    
+    // Add a practice header
+    const header = document.createElement('div');
+    header.className = 'practice-header';
+    header.innerHTML = '<span class="practice-header-icon">🎯</span> Weakest problems to practice';
+    container.appendChild(header);
+
+    practiceProblems.forEach((problem, i) => {
+      const card = createProblemCard(problem, i === 0);
+      card.classList.add('practice-card');
+      container.appendChild(card);
+    });
+
+    selectProblem(practiceProblems[0]);
+
+    // Update section title
+    const sectionTitle = document.querySelector('#current-section .section-title');
+    if (sectionTitle) sectionTitle.textContent = 'Practice Queue';
+  } else {
+    if (btn) {
+      btn.innerHTML = '<span class="practice-icon">📭</span> No problems to practice';
+      btn.disabled = true;
+    }
+  }
+}
+
 // ─── Rendering ─────────────────────────────────────────
 
-async function renderQueue(problems) {
+async function renderQueue(problems, allProblemsMap) {
   const container = document.getElementById('queue-container');
   const emptyState = document.getElementById('empty-state');
   const ratingSection = document.getElementById('rating-section');
-
-  if (!problems || problems.length === 0) {
-    container.innerHTML = '';
-    container.appendChild(createEmptyState());
-    ratingSection.style.display = 'none';
-    currentProblem = null;
-    return;
-  }
-
-  container.innerHTML = '';
 
   // Detect if user is currently on a LeetCode problem page
   let activeSlug = null;
@@ -152,22 +197,45 @@ async function renderQueue(problems) {
     // Ignore permissions/query errors
   }
 
-  // Auto-select the problem they are currently viewing if it's in the queue
+  container.innerHTML = '';
+  
+  let problemsToRender = [...(problems || [])];
+
+  // If the currently open tab is a tracked problem but NOT in the due queue, add it to the top!
+  if (activeSlug && allProblemsMap && allProblemsMap[activeSlug]) {
+    if (!problemsToRender.some(p => p.id === activeSlug)) {
+      const activeObj = { ...allProblemsMap[activeSlug], _isCurrentTab: true };
+      problemsToRender.unshift(activeObj);
+    }
+  }
+
+  if (problemsToRender.length === 0) {
+    container.appendChild(createEmptyState());
+    ratingSection.style.display = 'none';
+    currentProblem = null;
+    return;
+  }
+
+  // Auto-select the problem they are currently viewing
   let selectedIndex = 0;
   if (activeSlug) {
-    const matchIdx = problems.findIndex(p => p.id === activeSlug);
+    const matchIdx = problemsToRender.findIndex(p => p.id === activeSlug);
     if (matchIdx !== -1) {
       selectedIndex = matchIdx;
     }
   }
 
-  problems.forEach((problem, i) => {
+  problemsToRender.forEach((problem, i) => {
     const card = createProblemCard(problem, i === selectedIndex);
+    if (problem._isCurrentTab) {
+      card.style.border = '1px solid var(--accent)';
+      card.title = "Currently open in active tab";
+    }
     container.appendChild(card);
   });
 
   // Select the determined problem
-  selectProblem(problems[selectedIndex]);
+  selectProblem(problemsToRender[selectedIndex]);
 }
 
 function createEmptyState() {
@@ -176,7 +244,10 @@ function createEmptyState() {
   div.innerHTML = `
     <div class="empty-icon">✨</div>
     <div class="empty-title">All caught up!</div>
-    <div class="empty-message">Solve problems on LeetCode to grow your deck.</div>
+    <div class="empty-message">No problems are due for review today.</div>
+    <button type="button" class="practice-now-btn" id="btn-practice-now">
+      <span class="practice-icon">🔄</span> Practice Weak Problems
+    </button>
   `;
   return div;
 }
@@ -190,10 +261,16 @@ function createProblemCard(problem, isActive) {
   const dueText = getRelativeTime(problem.nextDueDate);
   const isOverdue = new Date(problem.nextDueDate) < new Date();
 
+  const url = `${problem.url || `https://leetcode.com/problems/${getProblemSlug(problem)}/`}?lr_reset=true`;
+
   card.innerHTML = `
     <div class="problem-difficulty-dot ${diff}"></div>
     <div class="problem-info">
-      <div class="problem-title">${escapeHtml(problem.title)}</div>
+      <div class="problem-title">
+        <a href="${url}" target="_blank" title="Solve on LeetCode" style="color: inherit; text-decoration: none;">
+          ${escapeHtml(problem.title)} <span style="opacity: 0.6; font-size: 11px; margin-left: 4px;">↗</span>
+        </a>
+      </div>
       <div class="problem-meta">${problem.difficulty} · Solved ${problem.solveCount}x</div>
     </div>
     <div class="problem-due ${isOverdue ? 'overdue' : ''}">${dueText}</div>
@@ -270,22 +347,31 @@ function renderUpcoming(allProblems) {
   `).join('');
 }
 
-function updateProgress(dueProblems, stats) {
-  const total = dueProblems.length;
-  const reviewed = dueProblems.filter(p => {
-    const today = new Date().toISOString().split('T')[0];
-    return p.history?.some(h => h.date.startsWith(today));
+function updateProgress(dueProblems, allProblemsMap, settings, stats) {
+  const limit = settings.dailyReviewLimit || 3;
+  const todayStr = new Date().toISOString().split('T')[0];
+  
+  const allProblems = Object.values(allProblemsMap);
+  const reviewedToday = allProblems.filter(p => {
+    if (!p.history) return false;
+    const hasReviewToday = p.history.some(h => h.date.startsWith(todayStr));
+    const wasOldProblem = p.history.some(h => !h.date.startsWith(todayStr));
+    return hasReviewToday && wasOldProblem;
   }).length;
+  
+  const remainingDue = dueProblems.length;
+  const totalTarget = Math.min(limit, reviewedToday + remainingDue);
+  const displayReviewed = Math.min(reviewedToday, totalTarget);
 
-  const pct = total > 0 ? Math.round((reviewed / total) * 100) : (stats?.totalProblems > 0 ? 100 : 0);
+  const pct = totalTarget > 0 ? Math.round((displayReviewed / totalTarget) * 100) : (stats?.totalProblems > 0 ? 100 : 0);
   document.getElementById('progress-bar').style.width = `${pct}%`;
-  document.getElementById('due-count').textContent = total - reviewed;
+  document.getElementById('due-count').textContent = remainingDue;
 
   const label = document.getElementById('progress-label');
-  if (total === 0) {
+  if (totalTarget === 0 || remainingDue === 0) {
     label.textContent = stats?.totalProblems > 0 ? 'All reviews complete!' : 'No problems tracked yet';
   } else {
-    label.textContent = `${reviewed} of ${total} reviews done today`;
+    label.textContent = `${displayReviewed} of ${totalTarget} reviews done today`;
   }
 }
 

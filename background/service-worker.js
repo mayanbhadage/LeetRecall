@@ -165,6 +165,9 @@ async function handleMessage(message, sender) {
     case 'UPDATE_PROBLEM_TAGS':
       return await handleUpdateProblemTags(message.data);
 
+    case 'GET_PRACTICE_PROBLEMS':
+      return await handleGetPracticeProblems();
+
     case 'OPEN_DASHBOARD':
       chrome.tabs.create({ url: chrome.runtime.getURL('dashboard/dashboard.html') });
       return { success: true };
@@ -273,7 +276,9 @@ async function handleRateConfidence(data) {
 
   problem.lastSolvedAt = new Date().toISOString();
   
-  // Add to history (now includes notes)
+  const todayStr = new Date().toISOString().split('T')[0];
+  const existingTodayIndex = problem.history.findIndex(h => h.date.startsWith(todayStr));
+
   const historyEntry = {
     date: new Date().toISOString(),
     rating: rating,
@@ -284,19 +289,26 @@ async function handleRateConfidence(data) {
     historyEntry.notes = notes.filter(n => n.trim().length > 0);
   }
 
-  problem.history.push(historyEntry);
+  if (existingTodayIndex >= 0) {
+    // Overwrite today's previous rating
+    if (!historyEntry.notes && problem.history[existingTodayIndex].notes) {
+       historyEntry.notes = problem.history[existingTodayIndex].notes;
+    }
+    problem.history[existingTodayIndex] = historyEntry;
+  } else {
+    problem.history.push(historyEntry);
+
+    // Update stats
+    const stats = await Storage.getStats();
+    stats.totalReviews += 1;
+    await updateStreak(stats);
+    await Storage.saveStats(stats);
+
+    // Track activity
+    await Storage.recordActivity('reviewed');
+  }
 
   await Storage.saveProblem(slug, problem);
-
-  // Update stats
-  const stats = await Storage.getStats();
-  stats.totalReviews += 1;
-  await updateStreak(stats);
-  await Storage.saveStats(stats);
-
-  // Track activity
-  await Storage.recordActivity('reviewed');
-
   await updateBadge();
 
   console.log(`[LeetRecall] Rated ${problem.title}: ${rating} → next in ${result.interval} days`);
@@ -312,6 +324,35 @@ async function handleGetDueProblems() {
 async function handleGetAllProblems() {
   const problems = await Storage.getProblems();
   return { success: true, problems };
+}
+
+async function handleGetPracticeProblems() {
+  const problems = await Storage.getProblems();
+  const settings = await Storage.getSettings();
+  const limit = settings.dailyReviewLimit || 3;
+  const now = new Date();
+  const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+
+  const allProblems = Object.values(problems);
+
+  // Exclude problems already due today (they belong in the regular queue)
+  const candidates = allProblems.filter(p => new Date(p.nextDueDate) > endOfDay);
+
+  if (candidates.length === 0) {
+    return { success: true, problems: [] };
+  }
+
+  // Sort by weakness:
+  // 1. Lowest efactor (hardest for the user)
+  // 2. Fewest solve count
+  // 3. Oldest lastSolvedAt (longest since last practice)
+  candidates.sort((a, b) => {
+    if (a.efactor !== b.efactor) return a.efactor - b.efactor;
+    if ((a.solveCount || 0) !== (b.solveCount || 0)) return (a.solveCount || 0) - (b.solveCount || 0);
+    return new Date(a.lastSolvedAt || 0) - new Date(b.lastSolvedAt || 0);
+  });
+
+  return { success: true, problems: candidates.slice(0, limit) };
 }
 
 async function handleGetProblem({ slug }) {
