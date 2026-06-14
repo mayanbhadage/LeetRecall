@@ -373,13 +373,17 @@
       observer.disconnect();
       return;
     }
-    if (!pageReady && !submissionInFlight) return;
+    // ONLY scan when we know a submission is in flight.
+    // The fetch interceptor is the primary detection — this is just a backup.
+    if (!submissionInFlight) return;
     
-    // Throttle: run at most once per 500ms to avoid locking the page
+    // Throttle: run at most once per 500ms
     if (scanTimeout) return;
     scanTimeout = setTimeout(() => {
       scanTimeout = null;
-      scanVisibleSubmissionResult();
+      if (submissionInFlight) {
+        scanVisibleSubmissionResult();
+      }
     }, SCAN_THROTTLE_MS);
   });
 
