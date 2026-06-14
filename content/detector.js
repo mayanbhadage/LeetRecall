@@ -267,72 +267,75 @@
   // This is the most reliable method — it fires when LeetCode's
   // submission API actually returns status_msg or statusDisplay.
 
-  const originalFetch = window.fetch;
-  window.fetch = async function (...args) {
-    // 1. Intercept the outbound request to detect submission start
-    try {
-      const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
-      const options = args[1] || {};
-      
-      if (url.includes('/submit')) {
-        submissionInFlight = true;
-        console.log('[LeetRecall] Network submit detected (REST /submit)');
-        setTimeout(() => { submissionInFlight = false; }, 30000);
-      } else if (url.includes('/graphql') && typeof options.body === 'string') {
-        // Detect GraphQL submit mutation
-        if (options.body.includes('"submitCode"') || options.body.includes('"questionSubmit"')) {
-          submissionInFlight = true;
-          console.log('[LeetRecall] Network submit detected (GraphQL)');
-          setTimeout(() => { submissionInFlight = false; }, 30000);
+  // Prevent double-wrapping if extension reloads and injects a new content script.
+  // The fetch wrapper dispatches a custom DOM event so any active script instance can receive it.
+  if (!window.__leetrecall_fetch_patched) {
+    window.__leetrecall_fetch_patched = true;
+    const originalFetch = window.fetch;
+    window.fetch = async function (...args) {
+      // 1. Detect outbound submission requests
+      try {
+        const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
+        const options = args[1] || {};
+        
+        if (url.includes('/submit')) {
+          window.dispatchEvent(new CustomEvent('leetrecall:submit-start'));
+        } else if (url.includes('/graphql') && typeof options.body === 'string') {
+          if (options.body.includes('"submitCode"') || options.body.includes('"questionSubmit"')) {
+            window.dispatchEvent(new CustomEvent('leetrecall:submit-start'));
+          }
         }
-      }
-    } catch (e) {
-      // Ignore outbound inspection errors
-    }
+      } catch (e) {}
 
-    const response = await originalFetch.apply(this, args);
+      const response = await originalFetch.apply(this, args);
 
-    // 2. Intercept the inbound response to get the result
-    try {
-      const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
+      // 2. Detect inbound submission results
+      try {
+        const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
 
-      if (url.includes('/check/') || url.includes('/graphql') || url.includes('/submit')) {
-        const clone = response.clone();
-        clone.json().then((data) => {
-          // REST API format
-          if (data?.status_msg && data?.state !== 'PENDING' && data?.state !== 'STARTED') {
-            console.log('[LeetRecall] REST response received:', data.status_msg, data.state);
-            if (submissionInFlight) {
-              submissionInFlight = false;
-              processStatus(data.status_msg, '', true);
-            }
-            return;
-          }
-
-          // GraphQL format
-          if (submissionInFlight) {
-            const jsonStr = JSON.stringify(data);
-            const match = jsonStr.match(/"(?:statusDisplay|status_msg)"\s*:\s*"([^"]+)"/);
-            if (match && match[1]) {
-              const status = match[1];
-              console.log('[LeetRecall] GraphQL response received:', status);
-              if (status !== 'Pending' && status !== 'Judging') {
-                submissionInFlight = false;
-                processStatus(status, '', true);
+        if (url.includes('/check/') || url.includes('/graphql') || url.includes('/submit')) {
+          const clone = response.clone();
+          clone.json().then((data) => {
+            try {
+              // REST API format
+              if (data?.status_msg && data?.state !== 'PENDING' && data?.state !== 'STARTED') {
+                window.dispatchEvent(new CustomEvent('leetrecall:submit-result', {
+                  detail: { status: data.status_msg, source: 'REST' }
+                }));
+                return;
               }
-            }
-          }
-        }).catch((err) => { 
-          console.log('[LeetRecall] Error parsing response:', err.message);
-        });
-      }
-    } catch (e) {
-      // Silently fail — don't break LeetCode
-      console.log('[LeetRecall] Error in fetch interception:', e.message);
-    }
 
-    return response;
-  };
+              // GraphQL format
+              const jsonStr = JSON.stringify(data);
+              const match = jsonStr.match(/"(?:statusDisplay|status_msg)"\s*:\s*"([^"]+)"/);
+              if (match && match[1] && match[1] !== 'Pending' && match[1] !== 'Judging') {
+                window.dispatchEvent(new CustomEvent('leetrecall:submit-result', {
+                  detail: { status: match[1], source: 'GraphQL' }
+                }));
+              }
+            } catch (e) {}
+          }).catch(() => {});
+        }
+      } catch (e) {}
+
+      return response;
+    };
+  }
+
+  // Listen for custom events from the fetch wrapper (works even after extension reload)
+  window.addEventListener('leetrecall:submit-start', () => {
+    submissionInFlight = true;
+    console.log('[LeetRecall] Submit detected via fetch');
+    setTimeout(() => { submissionInFlight = false; }, 30000);
+  });
+
+  window.addEventListener('leetrecall:submit-result', (e) => {
+    const { status, source } = e.detail || {};
+    if (!status || !submissionInFlight) return;
+    console.log(`[LeetRecall] ${source} response received:`, status);
+    submissionInFlight = false;
+    processStatus(status, '', true);
+  });
 
   // ─── Click & Keyboard Detection (Fallback for setting submissionInFlight) ─
   document.addEventListener('click', (e) => {
@@ -579,28 +582,31 @@
     chrome.runtime.sendMessage(
       { type: 'PROBLEM_SUBMITTED', data: problemInfo },
       (response) => {
-        if (chrome.runtime.lastError) {
-          console.error('[LeetRecall] Error sending message:', chrome.runtime.lastError);
-          if (submissionKey) pendingSubmissionKeys.delete(submissionKey);
-          return;
-        }
-        if (response?.success) {
-          if (submissionKey) {
-            lastProcessedSubmissionKey = submissionKey;
-            sessionStorage.setItem('leetrecall_last_submission_key', submissionKey);
+        try {
+          if (chrome.runtime.lastError) {
+            console.error('[LeetRecall] Error sending message:', chrome.runtime.lastError);
+            if (submissionKey) pendingSubmissionKeys.delete(submissionKey);
+            return;
+          }
+          if (response?.success) {
+            if (submissionKey) {
+              lastProcessedSubmissionKey = submissionKey;
+              sessionStorage.setItem('leetrecall_last_submission_key', submissionKey);
+              pendingSubmissionKeys.delete(submissionKey);
+            }
+            if (status === 'Accepted') {
+              showCelebration(problemInfo.title, response.isNew);
+              clearTimeTracker(slug);
+              activeTimeMs = 0;
+              lastActiveTimestamp = Date.now();
+            } else {
+              showFailureToast(problemInfo.title, status);
+            }
+          } else if (submissionKey) {
             pendingSubmissionKeys.delete(submissionKey);
           }
-          if (status === 'Accepted') {
-            showCelebration(problemInfo.title, response.isNew);
-            // Clear timer so a future spaced repetition review starts fresh
-            clearTimeTracker(slug);
-            activeTimeMs = 0;
-            lastActiveTimestamp = Date.now();
-          } else {
-            showFailureToast(problemInfo.title, status);
-          }
-        } else if (submissionKey) {
-          pendingSubmissionKeys.delete(submissionKey);
+        } catch (e) {
+          console.error('[LeetRecall] Error in sendMessage callback:', e);
         }
       }
     );
