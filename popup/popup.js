@@ -32,6 +32,37 @@ async function loadData() {
 
   if (dueRes.success && allProblemsRes.success && settingsRes.success) {
     dueProblems = dueRes.problems;
+
+    // If no due problems, check for a saved practice queue
+    if (dueProblems.length === 0) {
+      try {
+        const stored = await chrome.storage.session.get('practiceQueue');
+        const practiceSlugs = stored.practiceQueue || [];
+        if (practiceSlugs.length > 0) {
+          const practiceProblems = practiceSlugs
+            .map(slug => allProblemsMap[slug])
+            .filter(Boolean)
+            .map(p => ({ ...p, _isPractice: true }));
+          if (practiceProblems.length > 0) {
+            renderPracticeQueue(practiceProblems);
+            updateProgress(dueProblems, allProblemsMap, settingsRes.settings, statsRes?.stats);
+            // Skip the normal renderQueue
+            if (statsRes.success) updateStats(statsRes.stats);
+            if (allProblemsRes.success) {
+              renderUpcoming(Object.values(allProblemsMap));
+              Object.values(allProblemsMap).forEach(p => {
+                if (p.tags) p.tags.forEach(t => allExistingTags.add(t));
+              });
+              populateTagsDatalist();
+            }
+            return;
+          }
+        }
+      } catch (e) {
+        // session storage might not be available, ignore
+      }
+    }
+
     await renderQueue(dueProblems, allProblemsMap);
     updateProgress(dueProblems, allProblemsMap, settingsRes.settings, statsRes?.stats);
   }
@@ -143,35 +174,44 @@ async function handlePracticeNow() {
 
   const res = await sendMessage('GET_PRACTICE_PROBLEMS');
   if (res.success && res.problems.length > 0) {
-    // Mark these as practice problems so the UI can label them
     const practiceProblems = res.problems.map(p => ({ ...p, _isPractice: true }));
     
-    const container = document.getElementById('queue-container');
-    container.innerHTML = '';
-    
-    // Add a practice header
-    const header = document.createElement('div');
-    header.className = 'practice-header';
-    header.innerHTML = '<span class="practice-header-icon">🎯</span> Weakest problems to practice';
-    container.appendChild(header);
+    // Persist the practice queue so it survives popup close/reopen
+    try {
+      const slugs = practiceProblems.map(p => p.id);
+      await chrome.storage.session.set({ practiceQueue: slugs });
+    } catch (e) {
+      // Ignore if session storage unavailable
+    }
 
-    practiceProblems.forEach((problem, i) => {
-      const card = createProblemCard(problem, i === 0);
-      card.classList.add('practice-card');
-      container.appendChild(card);
-    });
-
-    selectProblem(practiceProblems[0]);
-
-    // Update section title
-    const sectionTitle = document.querySelector('#current-section .section-title');
-    if (sectionTitle) sectionTitle.textContent = 'Practice Queue';
+    renderPracticeQueue(practiceProblems);
   } else {
     if (btn) {
       btn.innerHTML = '<span class="practice-icon">📭</span> No problems to practice';
       btn.disabled = true;
     }
   }
+}
+
+function renderPracticeQueue(practiceProblems) {
+  const container = document.getElementById('queue-container');
+  container.innerHTML = '';
+  
+  const header = document.createElement('div');
+  header.className = 'practice-header';
+  header.innerHTML = '<span class="practice-header-icon">🎯</span> Weakest problems to practice';
+  container.appendChild(header);
+
+  practiceProblems.forEach((problem, i) => {
+    const card = createProblemCard(problem, i === 0);
+    card.classList.add('practice-card');
+    container.appendChild(card);
+  });
+
+  selectProblem(practiceProblems[0]);
+
+  const sectionTitle = document.querySelector('#current-section .section-title');
+  if (sectionTitle) sectionTitle.textContent = 'Practice Queue';
 }
 
 // ─── Rendering ─────────────────────────────────────────
@@ -404,6 +444,8 @@ async function rateConfidence(slug, rating) {
     renderNotesList();
     renderTagsList();
     document.getElementById('notes-review-section').style.display = 'none';
+    // Clear practice queue so it refreshes after rating
+    try { await chrome.storage.session.remove('practiceQueue'); } catch (e) {}
     await loadData();
   }
 }

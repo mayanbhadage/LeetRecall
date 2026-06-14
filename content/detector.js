@@ -365,13 +365,22 @@
 
   // ─── DOM Observer (BACKUP — only when submission is in flight) ─
 
-  const observer = new MutationObserver((mutations) => {
+  let scanTimeout = null;
+  const SCAN_THROTTLE_MS = 500;
+
+  const observer = new MutationObserver(() => {
     if (checkOrphaned()) {
       observer.disconnect();
       return;
     }
     if (!pageReady && !submissionInFlight) return;
-    scanVisibleSubmissionResult();
+    
+    // Throttle: run at most once per 500ms to avoid locking the page
+    if (scanTimeout) return;
+    scanTimeout = setTimeout(() => {
+      scanTimeout = null;
+      scanVisibleSubmissionResult();
+    }, SCAN_THROTTLE_MS);
   });
 
   function scanVisibleSubmissionResult() {
@@ -384,32 +393,23 @@
   }
 
   function detectVisibleSubmissionResult() {
+    // Only check the specific result element — never read document.body.innerText
     const resultEl = document.querySelector('[data-e2e-locator="submission-result"]');
-    let resultText = '';
-    
-    // Only process if the element is actually visible on the screen
-    if (resultEl && resultEl.offsetParent !== null) {
-      resultText = resultEl.innerText?.trim() || '';
-    }
+    if (!resultEl || resultEl.offsetParent === null) return null;
 
-    if (resultText && !isPendingStatus(resultText)) {
-      const status = normalizeSubmissionStatus(resultText);
-      if (status) {
-        const pageText = `${resultText}\n${document.body.innerText || ''}`;
-        return {
-          status,
-          signature: buildSubmissionSignature(status, pageText),
-        };
-      }
-    }
+    const resultText = resultEl.innerText?.trim() || '';
+    if (!resultText || isPendingStatus(resultText)) return null;
 
-    const bodyText = document.body.innerText || '';
-    const status = findStatusInSubmissionText(bodyText);
+    const status = normalizeSubmissionStatus(resultText);
     if (!status) return null;
+
+    // Build signature from the result element's parent context only (lightweight)
+    const contextEl = resultEl.closest('[class*="submission"]') || resultEl.parentElement;
+    const contextText = `${resultText}\n${contextEl?.innerText || ''}`;
 
     return {
       status,
-      signature: buildSubmissionSignature(status, bodyText),
+      signature: buildSubmissionSignature(status, contextText),
     };
   }
 
