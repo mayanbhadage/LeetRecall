@@ -444,8 +444,17 @@ async function rateConfidence(slug, rating) {
     renderNotesList();
     renderTagsList();
     document.getElementById('notes-review-section').style.display = 'none';
-    // Clear practice queue so it refreshes after rating
-    try { await chrome.storage.session.remove('practiceQueue'); } catch (e) {}
+    // Remove just the rated problem from the practice queue, keep the rest
+    try {
+      const stored = await chrome.storage.session.get('practiceQueue');
+      const queue = stored.practiceQueue || [];
+      const updated = queue.filter(s => s !== slug);
+      if (updated.length > 0) {
+        await chrome.storage.session.set({ practiceQueue: updated });
+      } else {
+        await chrome.storage.session.remove('practiceQueue');
+      }
+    } catch (e) {}
     await loadData();
   }
 }
