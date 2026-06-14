@@ -3,7 +3,7 @@
  * 
  * Detects accepted submissions on LeetCode problem pages using:
  * 1. Fetch interception (PRIMARY — most reliable, fires exactly once)
- * 2. DOM MutationObserver (BACKUP — only active after a submit click)
+ * 2. Bounded DOM checks (BACKUP — only after a submit click)
  * 
  * Handles SPA navigation (LeetCode is a React SPA).
  * Shows celebration animation on accepted submission.
@@ -226,9 +226,9 @@
   }
 
   let lastUrl = window.location.href;
-  const urlObserver = new MutationObserver(() => {
+  const urlInterval = setInterval(() => {
     if (checkOrphaned()) {
-      urlObserver.disconnect();
+      clearInterval(urlInterval);
       return;
     }
     if (window.location.href !== lastUrl) {
@@ -255,9 +255,7 @@
         console.log(`[LeetRecall] Navigated to: ${newSlug}`);
       }
     }
-  });
-
-  urlObserver.observe(document.body, { childList: true, subtree: true });
+  }, 1000);
   currentSlug = getCurrentSlug();
   if (currentSlug) {
     loadTimeTracker(currentSlug);
@@ -324,9 +322,8 @@
 
   // Listen for custom events from the fetch wrapper (works even after extension reload)
   window.addEventListener('leetrecall:submit-start', () => {
-    submissionInFlight = true;
+    startSubmission();
     console.log('[LeetRecall] Submit detected via fetch');
-    setTimeout(() => { submissionInFlight = false; }, 30000);
   });
 
   window.addEventListener('leetrecall:submit-result', (e) => {
@@ -356,39 +353,28 @@
   }, true);
 
   function startSubmission() {
+    if (checkOrphaned()) return;
     submissionInFlight = true;
-    setTimeout(() => { submissionInFlight = false; }, 30000);
-    
     // Mark the old result so a new accepted screen can still be detected later.
     const oldResult = document.querySelector('[data-e2e-locator="submission-result"]');
     if (oldResult) {
       oldResult.setAttribute('data-old-result', 'true');
     }
+
+    [500, 1500, 3000, 6000, 10000].forEach(delay => {
+      setTimeout(() => {
+        if (submissionInFlight) scanVisibleSubmissionResult();
+      }, delay);
+    });
+
+    setTimeout(() => {
+      submissionInFlight = false;
+    }, 12000);
   }
 
-  // ─── DOM Observer (BACKUP — only when submission is in flight) ─
+  // ─── DOM Checks (BACKUP — only when submission is in flight) ─
 
-  let scanTimeout = null;
-  const SCAN_THROTTLE_MS = 500;
-
-  const observer = new MutationObserver(() => {
-    if (checkOrphaned()) {
-      observer.disconnect();
-      return;
-    }
-    // ONLY scan when we know a submission is in flight.
-    // The fetch interceptor is the primary detection — this is just a backup.
-    if (!submissionInFlight) return;
-    
-    // Throttle: run at most once per 500ms
-    if (scanTimeout) return;
-    scanTimeout = setTimeout(() => {
-      scanTimeout = null;
-      if (submissionInFlight) {
-        scanVisibleSubmissionResult();
-      }
-    }, SCAN_THROTTLE_MS);
-  });
+  // DOM fallback: no MutationObserver. Only bounded one-shot checks after submit.
 
   function scanVisibleSubmissionResult() {
     const detected = detectVisibleSubmissionResult();
@@ -401,23 +387,71 @@
 
   function detectVisibleSubmissionResult() {
     // Only check the specific result element — never read document.body.innerText
-    const resultEl = document.querySelector('[data-e2e-locator="submission-result"]');
-    if (!resultEl || resultEl.offsetParent === null) return null;
+    const resultEl = findVisibleSubmissionStatusElement();
+    if (!resultEl) return null;
 
-    const resultText = resultEl.innerText?.trim() || '';
+    const resultText = resultEl.textContent?.trim() || '';
     if (!resultText || isPendingStatus(resultText)) return null;
 
     const status = normalizeSubmissionStatus(resultText);
     if (!status) return null;
 
     // Build signature from the result element's parent context only (lightweight)
-    const contextEl = resultEl.closest('[class*="submission"]') || resultEl.parentElement;
-    const contextText = `${resultText}\n${contextEl?.innerText || ''}`;
+    const contextEl = findSubmissionContextElement(resultEl);
+    const contextText = `${resultText}\n${contextEl?.textContent || ''}`;
 
     return {
       status,
       signature: buildSubmissionSignature(status, contextText),
     };
+  }
+
+  function findVisibleSubmissionStatusElement() {
+    const direct = document.querySelector('[data-e2e-locator="submission-result"]');
+    if (direct && isVisibleElement(direct)) return direct;
+
+    const candidates = document.querySelectorAll([
+      '[class*="text-green"]',
+      '[class*="text-success"]',
+      '[class*="text-red"]',
+      '[class*="text-danger"]',
+      '[class*="text-yellow"]',
+      '[class*="text-warning"]',
+      '[class*="text-orange"]',
+    ].join(','));
+    for (const el of candidates) {
+      if (!isVisibleElement(el)) continue;
+      const text = (el.textContent || '').trim();
+      if (text.length === 0 || text.length > 160) continue;
+      if (!normalizeSubmissionStatus(text) || isPendingStatus(text)) continue;
+
+      const context = findSubmissionContextElement(el);
+      const contextText = context?.textContent || '';
+      if (findStatusInSubmissionText(`${text}\n${contextText}`)) return el;
+    }
+
+    return null;
+  }
+
+  function findSubmissionContextElement(el) {
+    let current = el;
+    for (let depth = 0; current && depth < 6; depth++) {
+      const text = current.textContent || '';
+      if (text.length > 80 && text.length < 5000 && (
+        /submitted at/i.test(text) ||
+        /\d+\s*\/\s*\d+\s*testcases\s+passed/i.test(text) ||
+        (/runtime/i.test(text) && /memory/i.test(text))
+      )) {
+        return current;
+      }
+      current = current.parentElement;
+    }
+
+    return el.parentElement;
+  }
+
+  function isVisibleElement(el) {
+    return Boolean(el && el.isConnected && el.getClientRects().length > 0);
   }
 
   function findStatusInSubmissionText(text) {
@@ -480,7 +514,6 @@
   function onSubmissionResult(status, signature = '', wasUserInitiated = false) {
     // Guard: bail if extension was reloaded and this script is stale
     if (!chrome.runtime?.id) {
-      observer.disconnect();
       return;
     }
 
@@ -502,7 +535,7 @@
 
     // For passive detection (not user-initiated), ask the user for confirmation.
     if (!wasUserInitiated) {
-      // Lock immediately so the observer doesn't spawn more toasts
+      // Lock immediately so passive detection doesn't spawn more toasts
       if (isLocked && slug === lastDetectedSlug) {
         return;
       }
@@ -994,19 +1027,10 @@
   // Check for review notes on initial load (with delay for page to settle)
   setTimeout(() => {
     checkForReviewNotes();
-    scanVisibleSubmissionResult();
     checkForAutoReset();
   }, 2000);
 
-  setInterval(() => {
-    if (submissionInFlight) scanVisibleSubmissionResult();
-  }, 1500);
-
   // Also check when navigating to a new problem (SPA)
-  const originalCheckNotes = checkForReviewNotes;
-  const originalUrlObserverCallback = urlObserver._callback || (() => {});
-
-  // Patch into URL change detection to also check notes
   let lastNoteCheckSlug = '';
   setInterval(() => {
     const s = getCurrentSlug();
@@ -1019,11 +1043,6 @@
 
   // ─── Start Observing ──────────────────────────────────────────
 
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true,
-    characterData: true,
-  });
-
   console.log('[LeetRecall] Content script loaded — watching for submissions');
 })();
+
